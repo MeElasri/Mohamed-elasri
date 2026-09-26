@@ -6,13 +6,14 @@ Run it as a notebook (Kaggle / Jupyter) or cell by cell in VS Code / Spyder."""
 # %% [markdown]
 # # WavTR-Flow: flow matching for the WavTRGAN generator
 #
-# This notebook keeps the WavTRGAN generator (the wavelet-query TransUNet) and trains it as a **conditional flow-matching** model instead of a one-shot GAN generator.
+# This notebook keeps the WavTRGAN generator (the wavelet-query TransUNet) and trains it as a **conditional flow-matching** model instead of a one-shot GAN generator, for **blind** inpainting: the network only sees the corrupted image and is never given the mask of the corrupted region.
 #
 # **How it works**
-# - Images are mapped to [-1, 1]. For a training pair (masked input `y`, ground truth `x1`), draw noise `x0 ~ N(0, I)` and a time `t` in [0, 1], and form `x_t = t*x1 + (1 - t)*x0`.
+# - Images are mapped to [-1, 1]. For a training pair (corrupted input `y`, ground truth `x1`), draw noise `x0 ~ N(0, I)` and a time `t` in [0, 1], and form `x_t = t*x1 + (1 - t)*x0`.
 # - The generator receives `[y, x_t]` and `t` and predicts the clean image `x1_hat`. The velocity is `v_hat = (x1_hat - x_t) / (1 - t)` and the loss is the flow-matching loss `||v_hat - (x1 - x0)||^2`. Predicting the clean image (x-prediction) instead of the velocity suits this architecture: it never has to reproduce the noise through its thin full-resolution output path. `opt.pred = "v"` switches to plain velocity prediction.
 # - Optionally, the WavTRGAN losses (L1, VGG perceptual, style, PatchGAN) are also applied to the one-step estimate `x1_hat`, weighted by `t` so they act mostly where `x1_hat` is already sharp. Set their weights to 0 for pure flow matching.
 # - Sampling integrates `dx/dt = v_hat(x, t, y)` from `x0 ~ N(0, I)` at `t = 0` to `t = 1` with an EMA copy of the generator: by default Heun with 12 steps (23 generator calls) on a time grid that takes smaller steps near the image, or Euler.
+# - Mask prediction (`opt.mask_head`): a second output head predicts where `y` is corrupted, as in blind-inpainting networks such as VCNet. Its training target is computed from the training pair (the pixels where `y` and `x1` differ) and is never an input of the network, so the model stays blind. At test time the input pixels that the network is confident are uncorrupted are kept unchanged (`opt.composite`, `opt.composite_threshold`).
 #
 # **Changes to the generator** (the wavelet SSL, the 3-branch ResNetV2, the 3 transformer blocks and the TransUNet decoder are kept)
 # - Input: 6 channels `[y, x_t]` instead of 3; the SSL convolutions, the 1x1 fusion conv and the ResNet root are widened accordingly.
@@ -20,7 +21,8 @@ Run it as a notebook (Kaggle / Jupyter) or cell by cell in VS Code / Spyder."""
 # - Decoder BatchNorm -> GroupNorm: batch statistics would mix noise levels and differ between training and sampling.
 # - `opt.full_res_skip`: an extra 256x256 skip from the input into the last decoder block, which had none.
 # - The DWT/IDWT are built once in `__init__`. The old `SSL.forward` created `DWTInverse` on the CPU, which is the `torch.cuda.FloatTensor` / `torch.FloatTensor` error of the old evaluation cell.
-# - `opt.init_from_gan`: optional warm start from a trained WavTRGAN checkpoint.
+# - `opt.mask_head`: a 3x3 convolution next to the image head that outputs the logits of the corrupted-region mask.
+# - `opt.init_from_gan`: optional warm start from a trained WavTRGAN or WavTR-Flow checkpoint.
 #
 # The dataset layout, 286->256 random crops, direction `b2a`, the PatchGAN discriminator and the loss definitions are the same as in WavTRGAN.
 
@@ -44,7 +46,7 @@ import torch
 opt = SimpleNamespace(
     # data: <root_path>/train/{a,b} and <root_path>/test/{a,b}, as in WavTRGAN
     root_path="/kaggle/input/celeba-hq-img-full-50/CelebA-HQ-img",
-    direction="b2a",            # b2a: input = folder b (masked), target = folder a
+    direction="b2a",            # b2a: input = folder b (corrupted), target = folder a
     img_size=256,
     batch_size=4,
     test_batch_size=8,
@@ -83,12 +85,19 @@ opt = SimpleNamespace(
     lambda_gp=10.0,
     aux_weighting="t",          # per-sample weight of the x1_hat losses: "t", "t2" or "none"
 
+    # mask prediction (blind: the network never receives the mask, it learns to predict it)
+    mask_head=True,             # extra output head that predicts the corrupted region
+    lambda_mask=1.0,            # weight of its binary cross-entropy loss
+    mask_gt_threshold=0.1,      # its training target: pixels where input and ground truth differ by more than this
+    composite=True,             # test time: keep the input pixels that the network predicts as uncorrupted
+    composite_threshold=0.2,    # ... i.e. where the predicted mask is below this (< 0.5: when unsure, regenerate)
+
     # generator
     time_emb_dim=512,
     full_res_skip=True,
 
     # checkpoints / logging
-    init_from_gan="",           # e.g. "/kaggle/input/archive-3/netG_model_epoch_14.pth"
+    init_from_gan="",           # WavTRGAN or WavTR-Flow weights, e.g. "/kaggle/input/archive-3/netG_model_epoch_14.pth"
     resume="",                  # e.g. "checkpoint/flow_latest.pth" (models + optimizers of the last epoch)
     save_every=1,               # every N epochs also keep checkpoint/flow_ema_epoch_N.pth (EMA generator, ~0.2 GB)
     checkpoint_dir="checkpoint",
@@ -171,13 +180,20 @@ def get_test_set(root_dir, direction):
     return DatasetFromFolder(join(root_dir, "test"), direction, augment=False)
 
 
-def save_images(prediction, test_input, target, epoch, max_rows=4):
-    """Rows of (input, ground truth, prediction); all tensors in [0, 1]."""
+def corruption_mask(corrupted, clean):
+    """True corrupted region of a pair, (B, 1, H, W) in {0, 1}: pixels where the input differs from the ground truth
+    by more than opt.mask_gt_threshold. Only a training target and an evaluation reference, never a network input."""
+    return ((corrupted - clean).abs().amax(dim=1, keepdim=True) > opt.mask_gt_threshold).float()
+
+
+def save_images(prediction, test_input, target, epoch, mask=None, max_rows=4):
+    """Rows of (input, ground truth, prediction[, predicted mask]); all tensors in [0, 1]."""
     rows = min(max_rows, prediction.size(0))
-    fig, axes = plt.subplots(rows, 3, figsize=(12, 4 * rows), squeeze=False)
-    titles = ["Input Image", "Ground Truth", "Prediction Image"]
+    columns = [test_input, target, prediction] + ([mask.expand_as(prediction)] if mask is not None else [])
+    fig, axes = plt.subplots(rows, len(columns), figsize=(4 * len(columns), 4 * rows), squeeze=False)
+    titles = ["Input Image", "Ground Truth", "Prediction Image", "Predicted Mask"]
     for i in range(rows):
-        for j, img in enumerate((test_input, target, prediction)):
+        for j, img in enumerate(columns):
             axes[i, j].imshow(img[i].detach().cpu().clamp(0, 1).permute(1, 2, 0).numpy())
             axes[i, j].set_title(titles[j] if i == 0 else "")
             axes[i, j].axis("off")
@@ -188,7 +204,7 @@ def save_images(prediction, test_input, target, epoch, max_rows=4):
 # %% [markdown]
 # # WavTR-Flow generator
 #
-# The WavTRGAN generator with a 6-channel input `[y, x_t]` and time conditioning. Module names are unchanged, so WavTRGAN weights can be loaded (see the warm-start section).
+# The WavTRGAN generator with a 6-channel input `[y, x_t]`, time conditioning and an optional mask head. Module names are unchanged, so WavTRGAN weights can be loaded (see the warm-start section).
 
 # %%
 from collections import OrderedDict
@@ -616,10 +632,11 @@ class WavTRFlow(nn.Module):
     """WavTRGAN generator as a flow-matching network: out = G(x_t, t, y).
 
     x_t: state on the path from noise (t = 0) to the image (t = 1), in [-1, 1] scale; t: (B,) in [0, 1];
-    y: the conditioning (masked) image in [-1, 1]. The output is the clean-image estimate x1_hat when
-    opt.pred == "x", or the velocity when opt.pred == "v" (see model_velocity)."""
+    y: the corrupted image in [-1, 1] (no mask: blind inpainting). The output is the clean-image estimate x1_hat
+    when opt.pred == "x", or the velocity when opt.pred == "v" (see model_velocity). With mask_head=True,
+    return_mask=True also returns the logits of the predicted corrupted-region mask."""
 
-    def __init__(self, img_size=256, img_channels=3, vis=False, emb_dim=512, full_res_skip=True):
+    def __init__(self, img_size=256, img_channels=3, vis=False, emb_dim=512, full_res_skip=True, mask_head=False):
         super().__init__()
         in_channels = 2 * img_channels
         self.time_embed = TimeEmbedding(emb_dim)
@@ -629,17 +646,27 @@ class WavTRFlow(nn.Module):
         self.segmentation_head = SegmentationHead(in_channels=16, out_channels=img_channels, kernel_size=3)
         nn.init.zeros_(self.segmentation_head[0].weight)
         nn.init.zeros_(self.segmentation_head[0].bias)
+        self.mask_head = SegmentationHead(in_channels=16, out_channels=1, kernel_size=3) if mask_head else None
 
-    def forward(self, x_t, t, cond, return_attn=False, use_wavelet=True):
+    def forward(self, x_t, t, cond, return_attn=False, use_wavelet=True, return_mask=False):
         emb = self.time_embed(t)
         x = torch.cat((cond, x_t), dim=1)
         hidden, attn_weights, features = self.transformer(x, emb, use_wavelet=use_wavelet)
         if self.stem is not None:
             features = list(features) + [self.stem(x, emb)]
-        out = self.segmentation_head(self.decoder(hidden, features, emb))
+        feat = self.decoder(hidden, features, emb)
+        out = self.segmentation_head(feat)
+        outputs = (out,)
+        if return_mask:
+            outputs += (self.mask_head(feat) if self.mask_head is not None else None,)
         if return_attn:
-            return out, attn_weights
-        return out
+            outputs += (attn_weights,)
+        return outputs if len(outputs) > 1 else out
+
+
+def build_generator(vis=False):
+    return WavTRFlow(img_size=opt.img_size, vis=vis, emb_dim=opt.time_emb_dim, full_res_skip=opt.full_res_skip,
+                     mask_head=opt.mask_head)
 
 # %% [markdown]
 # # Flow matching: training loss, ODE sampler, EMA
@@ -662,45 +689,61 @@ def sample_t(batch_size, device):
 
 
 def model_velocity(net, x_t, t, cond, t_eps=0.0):
-    """One generator call -> (velocity v_hat, clean-image estimate x1_hat)."""
-    out = net(x_t, t, cond)
+    """One generator call -> (velocity v_hat, clean-image estimate x1_hat, mask logits or None)."""
+    out, mask_logits = net(x_t, t, cond, return_mask=True)
     one_minus_t = (1 - t).view(-1, 1, 1, 1)
     if opt.pred == "v":
-        return out, x_t + one_minus_t * out
-    return (out - x_t) / one_minus_t.clamp_min(max(t_eps, 1e-4)), out
+        return out, x_t + one_minus_t * out, mask_logits
+    return (out - x_t) / one_minus_t.clamp_min(max(t_eps, 1e-4)), out, mask_logits
 
 
 def flow_matching_loss(net, x1, cond):
     """Conditional flow matching on x_t = t*x1 + (1-t)*x0 with target velocity x1 - x0.
-    Returns the loss, the sampled t and the one-step estimate x1_hat (used by the auxiliary losses)."""
+    Returns the loss, the sampled t, the one-step estimate x1_hat (used by the auxiliary losses) and the
+    mask logits (None without a mask head)."""
     x0 = torch.randn_like(x1)
     t = sample_t(x1.size(0), x1.device)
     tt = t.view(-1, 1, 1, 1)
     x_t = tt * x1 + (1 - tt) * x0
-    v_hat, x1_hat = model_velocity(net, x_t, t, cond, opt.t_eps)
+    v_hat, x1_hat, mask_logits = model_velocity(net, x_t, t, cond, opt.t_eps)
     if opt.pred == "v":
         v_target = x1 - x0
     else:   # same clipped denominator as v_hat, i.e. the loss is ||x1_hat - x1||^2 / max(1 - t, t_eps)^2
         v_target = (x1 - x_t) / (1 - tt).clamp_min(opt.t_eps)
-    return F.mse_loss(v_hat, v_target), t, x1_hat
+    return F.mse_loss(v_hat, v_target), t, x1_hat, mask_logits
 
 
 @torch.no_grad()
 def sample_flow(net, cond, steps=None, solver=None, noise=None):
-    """Integrates dx/dt = v_hat(x, t, y) from x0 ~ N(0, I) at t = 0 to t = 1. cond and the result are in [-1, 1]."""
+    """Integrates dx/dt = v_hat(x, t, y) from x0 ~ N(0, I) at t = 0 to t = 1. cond and the result are in [-1, 1].
+    Also returns the mask probabilities of the last generator call (None without a mask head)."""
     steps = steps or opt.sample_steps
     solver = solver or opt.solver
     x = torch.randn_like(cond) if noise is None else noise
     ts = 1 - (1 - torch.linspace(0, 1, steps + 1, device=cond.device)) ** opt.sample_power
     for i in range(steps):
         dt = ts[i + 1] - ts[i]
-        v0, _ = model_velocity(net, x, ts[i].expand(x.size(0)), cond)
+        v0, _, mask_logits = model_velocity(net, x, ts[i].expand(x.size(0)), cond)
         if solver == "heun" and i < steps - 1:   # the last step stays Euler: x-prediction has no velocity at t = 1
-            v1, _ = model_velocity(net, x + dt * v0, ts[i + 1].expand(x.size(0)), cond)
+            v1, _, _ = model_velocity(net, x + dt * v0, ts[i + 1].expand(x.size(0)), cond)
             x = x + dt * (v0 + v1) / 2
         else:
             x = x + dt * v0
-    return x
+    return x, (None if mask_logits is None else torch.sigmoid(mask_logits))
+
+
+@torch.no_grad()
+def inpaint(net, cond, **kwargs):
+    """Blind inpainting of the corrupted images cond (in [-1, 1]) -> (result in [-1, 1], predicted mask or None).
+    With opt.composite, the input pixels that the network is confident are uncorrupted (predicted mask below
+    opt.composite_threshold) are kept; all other pixels, grown by one pixel, come from the ODE sample. Copying a
+    corrupted pixel is worse than regenerating a clean one, which the network is trained to reproduce, so the
+    threshold is below 0.5; an untrained mask head (about 0.5 everywhere) leaves the ODE sample unchanged."""
+    x, mask = sample_flow(net, cond, **kwargs)
+    if mask is not None and opt.composite:
+        hole = F.max_pool2d((mask > opt.composite_threshold).float(), kernel_size=3, stride=1, padding=1)
+        x = hole * x + (1 - hole) * cond
+    return x, mask
 
 
 @torch.no_grad()
@@ -930,7 +973,7 @@ class StyleLoss(nn.Module):
 # %% [markdown]
 # # Warm start from a WavTRGAN checkpoint (optional)
 #
-# Set `opt.init_from_gan` to a checkpoint saved by the old notebook (`torch.save(net_g, ...)`). Every tensor whose name and shape still match is copied: the ResNet body, the transformer, the decoder convolutions and the GroupNorm affine parameters (taken from BatchNorm). For the input layers that grew from 3 to 6 channels, only the overlapping slice is copied. The new time-conditioning layers are zero-initialised, so they start as no-ops. The old output head is rescaled from [0, 1] to [-1, 1] for x-prediction.
+# Set `opt.init_from_gan` to a checkpoint saved by the old notebook (`torch.save(net_g, ...)`) or to a WavTR-Flow checkpoint. Every tensor whose name and shape still match is copied: the ResNet body, the transformer, the decoder convolutions and the GroupNorm affine parameters (taken from BatchNorm). For the input layers that grew from 3 to 6 channels, only the overlapping slice is copied. The new time-conditioning layers are zero-initialised, so they start as no-ops. The old output head is rescaled from [0, 1] to [-1, 1] for x-prediction. The mask head is new in both cases.
 
 # %%
 import pickle
@@ -995,9 +1038,12 @@ def warm_start_from_gan(net, path):
 # # Train
 #
 # Checkpoints: `checkpoint/flow_latest.pth` (everything needed to resume, overwritten every epoch) and `checkpoint/flow_ema_epoch_N.pth` (EMA generator, for evaluation). On Kaggle, set `opt.max_epochs_per_run` so that a run finishes within the 12-hour limit, then continue in a new session with `opt.resume`.
+#
+# To add the mask head to a run trained without it, warm-start instead of resuming: `opt.init_from_gan = ".../checkpoint/flow_latest.pth"`, `opt.resume = ""`, and `opt.epoch_count` = the next epoch (e.g. 8) to keep the epoch numbering and the learning-rate schedule. The image generator (the EMA weights of that run) and the discriminator continue from the checkpoint; the mask head and the optimizer states start fresh. Before training, `samples/true_masks.jpg` shows the training target of the mask head for the preview images: it should cover the corrupted strokes.
 
 # %%
 from torch.utils.data import DataLoader
+from torchvision.utils import save_image
 
 print("===> Loading datasets")
 train_set = get_training_set(opt.root_path, opt.direction)
@@ -1010,9 +1056,14 @@ print(len(train_set), "training pairs,", len(test_set), "test pairs")
 # the same test images and noise are previewed after every epoch
 fixed_a, fixed_b = next(iter(testing_data_loader))
 fixed_noise = torch.randn(fixed_a.shape, generator=torch.Generator().manual_seed(opt.seed)).to(device)
+if opt.mask_head:   # training target of the mask head for the preview images: it should cover the corruption
+    true_masks = corruption_mask(fixed_a, fixed_b)
+    save_image(torch.cat((fixed_a, true_masks.expand_as(fixed_a))), os.path.join(opt.sample_dir, "true_masks.jpg"),
+               nrow=fixed_a.size(0))
+    print("true corruption mask: %.1f%% of the preview pixels" % (100 * true_masks.mean().item()))
 
 print("===> Building models")
-net_g = WavTRFlow(img_size=opt.img_size, emb_dim=opt.time_emb_dim, full_res_skip=opt.full_res_skip).to(device)
+net_g = build_generator().to(device)
 if opt.init_from_gan and not opt.resume:
     warm_start_from_gan(net_g, opt.init_from_gan)
 ema_g = copy.deepcopy(net_g).eval().requires_grad_(False)
@@ -1024,6 +1075,12 @@ if use_gan:
     net_d = define_D(6, 64, "basic", init_type="xavier", init_gain=0.02, gpu_id=device)
     optimizer_d = torch.optim.Adam(net_d.parameters(), lr=opt.lr_d, betas=(opt.beta1_d, 0.999))
     criterionGAN = GANLoss().to(device)
+    if opt.init_from_gan and not opt.resume:   # a WavTR-Flow checkpoint also holds its discriminator
+        src = torch.load(opt.init_from_gan, map_location="cpu", weights_only=False, pickle_module=_lenient_pickle)
+        if isinstance(src, dict) and "net_d" in src:
+            net_d.load_state_dict(src["net_d"])
+            print("warm start: discriminator loaded")
+        del src
 per_loss = VGGPerceptualLoss().to(device) if opt.lambda_per > 0 else None
 style_loss = StyleLoss().to(device) if opt.lambda_style > 0 else None
 use_aux = use_gan or opt.lambda_l1 > 0 or per_loss is not None or style_loss is not None
@@ -1031,6 +1088,9 @@ use_aux = use_gan or opt.lambda_l1 > 0 or per_loss is not None or style_loss is 
 global_step = 0
 if opt.resume:
     ckpt = torch.load(opt.resume, map_location="cpu", weights_only=False)
+    if ckpt["opt"].get("mask_head", False) != opt.mask_head:
+        raise ValueError("opt.mask_head differs from the checkpoint: warm-start with opt.init_from_gan = opt.resume "
+                         "and opt.resume = '' instead of resuming")
     net_g.load_state_dict(ckpt["net_g"])
     ema_g.load_state_dict(ckpt["ema_g"])
     optimizer_g.load_state_dict(ckpt["optimizer_g"])
@@ -1045,7 +1105,7 @@ if opt.resume:
 # created after resuming: the lambda policy offsets the epoch by opt.epoch_count
 net_g_scheduler = get_scheduler(optimizer_g, opt)
 net_d_scheduler = get_scheduler(optimizer_d, opt) if use_gan else None
-history = {"fm": [], "aux": [], "d": []}
+history = {"fm": [], "aux": [], "d": [], "mask": []}
 
 last_epoch = opt.niter + opt.niter_decay
 if opt.max_epochs_per_run:
@@ -1055,8 +1115,8 @@ for epoch in range(opt.epoch_count, last_epoch + 1):
     start = time.time()
     for iteration, batch in enumerate(training_data_loader, 1):
         # forward: flow-matching loss and one-step estimate x1_hat
-        real_a, real_b = batch[0].to(device), batch[1].to(device)   # [0, 1]; real_a = masked input
-        loss_fm, t, x1_hat = flow_matching_loss(net_g, to_model_range(real_b), to_model_range(real_a))
+        real_a, real_b = batch[0].to(device), batch[1].to(device)   # [0, 1]; real_a = corrupted input
+        loss_fm, t, x1_hat, mask_logits = flow_matching_loss(net_g, to_model_range(real_b), to_model_range(real_a))
         fake_b = (x1_hat + 1) / 2                                   # x1_hat in [0, 1]
 
         ######################
@@ -1078,6 +1138,10 @@ for epoch in range(opt.epoch_count, last_epoch + 1):
         ######################
         optimizer_g.zero_grad(set_to_none=True)
         loss_g = opt.lambda_fm * loss_fm
+        if mask_logits is not None:   # the true mask is only the target of the mask head, never an input
+            loss_mask = F.binary_cross_entropy_with_logits(mask_logits, corruption_mask(real_a, real_b))
+            loss_g = loss_g + opt.lambda_mask * loss_mask
+            history["mask"].append(loss_mask.item())
         if use_aux:
             aux = torch.zeros_like(t)   # per-sample WavTRGAN losses on x1_hat
             if opt.lambda_l1 > 0:
@@ -1108,6 +1172,8 @@ for epoch in range(opt.epoch_count, last_epoch + 1):
                 msg += " Loss_aux: {:.4f}".format(loss_aux.item())
             if use_gan:
                 msg += " Loss_D: {:.4f}".format(loss_d.item())
+            if mask_logits is not None:
+                msg += " Loss_mask: {:.4f}".format(loss_mask.item())
             print(msg)
         if opt.max_iters_per_epoch and iteration >= opt.max_iters_per_epoch:
             break
@@ -1118,8 +1184,8 @@ for epoch in range(opt.epoch_count, last_epoch + 1):
     print("===> Epoch {} took {:.1f} min".format(epoch, (time.time() - start) / 60))
 
     # preview: EMA generator, fixed test images and noise
-    prediction = sample_flow(ema_g, to_model_range(fixed_a.to(device)), noise=fixed_noise)
-    save_images(to_image_range(prediction), fixed_a, fixed_b, epoch)
+    prediction, pred_mask = inpaint(ema_g, to_model_range(fixed_a.to(device)), noise=fixed_noise)
+    save_images(to_image_range(prediction), fixed_a, fixed_b, epoch, mask=pred_mask)
 
     # checkpoints (state dicts): the EMA generator every save_every epochs for evaluation, and
     # flow_latest.pth with everything needed by opt.resume (~0.9 GB, overwritten every epoch)
@@ -1150,48 +1216,60 @@ plt.show()
 # %% [markdown]
 # # Generate test images
 #
-# Samples the test set with the EMA generator (`opt.sample_steps` ODE steps; `sample_steps=1` gives the one-step estimate from pure noise). The noise is seeded and the test images are resized to 256 without the random crop/flip of the old evaluation cell, so repeated runs are scored on the same images. `EVAL_CHECKPOINT` loads a saved checkpoint instead of the generator trained above.
+# Samples the test set with the EMA generator (`opt.sample_steps` ODE steps; `sample_steps=1` gives the one-step estimate from pure noise). The noise is seeded and the test images are resized to 256 without the random crop/flip of the old evaluation cell, so repeated runs are scored on the same images. `EVAL_CHECKPOINT` loads a saved checkpoint instead of the generator trained above. With the mask head, the predicted masks are saved to `pred_masks_flow` and compared with the true corrupted region of each test pair (pixel precision, recall, F1 and IoU); the true mask is used only for this score.
 
 # %%
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
 EVAL_CHECKPOINT = ""   # e.g. "checkpoint/flow_ema_epoch_40.pth"; empty: the EMA generator trained above
-REAL_DIR, FAKE_DIR = "Real_images_flow", "fake_images_flow"
+REAL_DIR, FAKE_DIR, MASK_DIR = "Real_images_flow", "fake_images_flow", "pred_masks_flow"
 MAX_EVAL_IMAGES = 2000
 
 
 def load_flow_generator(path):
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     cfg = ckpt.get("opt", {})
-    opt.pred = cfg.get("pred", opt.pred)   # sampling must use the parameterisation the model was trained with
-    net = WavTRFlow(img_size=cfg.get("img_size", opt.img_size), emb_dim=cfg.get("time_emb_dim", opt.time_emb_dim),
-                    full_res_skip=cfg.get("full_res_skip", opt.full_res_skip)).to(device)
+    for key in ("pred", "img_size", "time_emb_dim", "full_res_skip"):   # build and sample it as it was trained
+        setattr(opt, key, cfg.get(key, getattr(opt, key)))
+    opt.mask_head = cfg.get("mask_head", False)   # checkpoints from before the mask head have none
+    net = build_generator().to(device)
     net.load_state_dict(ckpt["ema_g"])
     return net.eval()
 
 
 eval_g = load_flow_generator(EVAL_CHECKPOINT) if EVAL_CHECKPOINT else ema_g.eval()
-os.makedirs(REAL_DIR, exist_ok=True)
-os.makedirs(FAKE_DIR, exist_ok=True)
+for folder in (REAL_DIR, FAKE_DIR, MASK_DIR):
+    os.makedirs(folder, exist_ok=True)
 eval_loader = DataLoader(get_test_set(opt.root_path, opt.direction), batch_size=opt.test_batch_size,
                          shuffle=False, num_workers=2)
 noise_gen = torch.Generator(device=device).manual_seed(opt.seed)
 
-n = 0
+n, tp, fp, fn = 0, 0, 0, 0
 start = time.time()
 for real_a, real_b in eval_loader:
+    real_a, real_b = real_a[:MAX_EVAL_IMAGES - n], real_b[:MAX_EVAL_IMAGES - n]
     noise = torch.randn(real_a.shape, device=device, generator=noise_gen)
-    fake_b = to_image_range(sample_flow(eval_g, to_model_range(real_a.to(device)), noise=noise)).cpu()
+    fake_b, mask = inpaint(eval_g, to_model_range(real_a.to(device)), noise=noise)
+    fake_b = to_image_range(fake_b).cpu()
+    if mask is not None:   # predicted vs true corrupted region (the true mask comes from the test pair)
+        mask = mask.cpu()
+        pred_m, true_m = mask > 0.5, corruption_mask(real_a, real_b) > 0.5
+        tp += (pred_m & true_m).sum().item()
+        fp += (pred_m & ~true_m).sum().item()
+        fn += (~pred_m & true_m).sum().item()
     for i in range(fake_b.size(0)):
-        if n == MAX_EVAL_IMAGES:
-            break
         save_image(real_b[i], os.path.join(REAL_DIR, f"{n}.png"))
         save_image(fake_b[i], os.path.join(FAKE_DIR, f"{n}.png"))
+        if mask is not None:
+            save_image(mask[i], os.path.join(MASK_DIR, f"{n}.png"))
         n += 1
     if n == MAX_EVAL_IMAGES:
         break
 print("%d images in %.1f min (%d steps, %s)" % (n, (time.time() - start) / 60, opt.sample_steps, opt.solver))
+if tp + fp + fn > 0:
+    print("predicted vs true mask: precision %.4f  recall %.4f  F1 %.4f  IoU %.4f" % (
+        tp / max(1, tp + fp), tp / max(1, tp + fn), 2 * tp / (2 * tp + fp + fn), tp / (tp + fp + fn)))
 
 # %% [markdown]
 # # Compute FID / IS
@@ -1251,7 +1329,7 @@ def attn_impact_map(attn_on, attn_off, layer_idx=-1, out_hw=(256, 256)):
 
 
 T_VIS = 0.5
-vis_g = WavTRFlow(img_size=opt.img_size, vis=True, emb_dim=opt.time_emb_dim, full_res_skip=opt.full_res_skip).to(device)
+vis_g = build_generator(vis=True).to(device)
 vis_g.load_state_dict(eval_g.state_dict())
 vis_g.eval()
 with torch.no_grad():
@@ -1261,12 +1339,12 @@ with torch.no_grad():
     x_t = T_VIS * to_model_range(gt) + (1 - T_VIS) * torch.randn_like(cond)
     _, attn_on = vis_g(x_t, t, cond, return_attn=True, use_wavelet=True)
     _, attn_off = vis_g(x_t, t, cond, return_attn=True, use_wavelet=False)
-    pred = to_image_range(sample_flow(vis_g, cond))
+    pred = to_image_range(inpaint(vis_g, cond)[0])
 
 impact = attn_impact_map(attn_on, attn_off, out_hw=tuple(inp.shape[-2:]))
 fig, ax = plt.subplots(1, 3, figsize=(15, 5))
 ax[0].imshow(inp[0].permute(1, 2, 0).cpu().numpy())
-ax[0].set_title("Input (masked)")
+ax[0].set_title("Input (corrupted)")
 ax[1].imshow(pred[0].permute(1, 2, 0).cpu().numpy())
 ax[1].set_title("Generated (inpainted)")
 ax[2].imshow(inp[0].permute(1, 2, 0).cpu().numpy())
