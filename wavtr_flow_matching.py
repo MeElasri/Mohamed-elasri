@@ -27,7 +27,7 @@ Run it as a notebook (Kaggle / Jupyter) or cell by cell in VS Code / Spyder."""
 # The dataset layout, 286->256 random crops, direction `b2a`, the PatchGAN discriminator and the loss definitions are the same as in WavTRGAN.
 
 # %%
-# %pip install -q pytorch_wavelets PyWavelets torch-fidelity   (notebook only; in a terminal: pip install pytorch_wavelets PyWavelets torch-fidelity)
+# %pip install -q pytorch_wavelets PyWavelets torch-fidelity lpips   (notebook only; in a terminal: pip install pytorch_wavelets PyWavelets torch-fidelity)
 
 # %% [markdown]
 # # Configuration
@@ -95,6 +95,7 @@ opt = SimpleNamespace(
     # generator
     time_emb_dim=512,
     full_res_skip=True,
+    use_wavelet=True,           # False: ablation without the wavelet query (the three branches see the input only)
 
     # checkpoints / logging
     init_from_gan="",           # WavTRGAN or WavTR-Flow weights, e.g. "/kaggle/input/archive-3/netG_model_epoch_14.pth"
@@ -690,7 +691,7 @@ def sample_t(batch_size, device):
 
 def model_velocity(net, x_t, t, cond, t_eps=0.0):
     """One generator call -> (velocity v_hat, clean-image estimate x1_hat, mask logits or None)."""
-    out, mask_logits = net(x_t, t, cond, return_mask=True)
+    out, mask_logits = net(x_t, t, cond, return_mask=True, use_wavelet=opt.use_wavelet)
     one_minus_t = (1 - t).view(-1, 1, 1, 1)
     if opt.pred == "v":
         return out, x_t + one_minus_t * out, mask_logits
@@ -1216,14 +1217,14 @@ plt.show()
 # %% [markdown]
 # # Generate test images
 #
-# Samples the test set with the EMA generator (`opt.sample_steps` ODE steps; `sample_steps=1` gives the one-step estimate from pure noise). The noise is seeded and the test images are resized to 256 without the random crop/flip of the old evaluation cell, so repeated runs are scored on the same images. `EVAL_CHECKPOINT` loads a saved checkpoint instead of the generator trained above. With the mask head, the predicted masks are saved to `pred_masks_flow` and compared with the true corrupted region of each test pair (pixel precision, recall, F1 and IoU); the true mask is used only for this score.
+# Samples the test set with the EMA generator (`opt.sample_steps` ODE steps; `sample_steps=1` gives the one-step estimate from pure noise). The noise is seeded and the test images are resized to 256 without the random crop/flip of the old evaluation cell, so repeated runs are scored on the same images. `EVAL_CHECKPOINT` loads a saved checkpoint instead of the generator trained above. With the mask head, the predicted masks are saved to `pred_masks_flow` and compared with the true corrupted region of each test pair (pixel precision, recall, F1 and IoU); the true mask is used only for this score. The corrupted inputs are saved to `input_images_flow`: to score another method on exactly the same images, save its outputs for these inputs under the same file names and point `FAKE_DIR` to that folder in the metric cells below. The sampling time per image is measured with batches of `opt.test_batch_size`.
 
 # %%
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
 EVAL_CHECKPOINT = ""   # e.g. "checkpoint/flow_ema_epoch_40.pth"; empty: the EMA generator trained above
-REAL_DIR, FAKE_DIR, MASK_DIR = "Real_images_flow", "fake_images_flow", "pred_masks_flow"
+REAL_DIR, FAKE_DIR, MASK_DIR, INPUT_DIR = "Real_images_flow", "fake_images_flow", "pred_masks_flow", "input_images_flow"
 MAX_EVAL_IMAGES = 2000
 
 
@@ -1233,24 +1234,29 @@ def load_flow_generator(path):
     for key in ("pred", "img_size", "time_emb_dim", "full_res_skip"):   # build and sample it as it was trained
         setattr(opt, key, cfg.get(key, getattr(opt, key)))
     opt.mask_head = cfg.get("mask_head", False)   # checkpoints from before the mask head have none
+    opt.use_wavelet = cfg.get("use_wavelet", True)
     net = build_generator().to(device)
     net.load_state_dict(ckpt["ema_g"])
     return net.eval()
 
 
 eval_g = load_flow_generator(EVAL_CHECKPOINT) if EVAL_CHECKPOINT else ema_g.eval()
-for folder in (REAL_DIR, FAKE_DIR, MASK_DIR):
+for folder in (REAL_DIR, FAKE_DIR, MASK_DIR, INPUT_DIR):
     os.makedirs(folder, exist_ok=True)
 eval_loader = DataLoader(get_test_set(opt.root_path, opt.direction), batch_size=opt.test_batch_size,
                          shuffle=False, num_workers=2)
 noise_gen = torch.Generator(device=device).manual_seed(opt.seed)
 
 n, tp, fp, fn = 0, 0, 0, 0
-start = time.time()
+start, sample_time = time.time(), 0.0
 for real_a, real_b in eval_loader:
     real_a, real_b = real_a[:MAX_EVAL_IMAGES - n], real_b[:MAX_EVAL_IMAGES - n]
     noise = torch.randn(real_a.shape, device=device, generator=noise_gen)
+    tic = time.time()
     fake_b, mask = inpaint(eval_g, to_model_range(real_a.to(device)), noise=noise)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    sample_time += time.time() - tic
     fake_b = to_image_range(fake_b).cpu()
     if mask is not None:   # predicted vs true corrupted region (the true mask comes from the test pair)
         mask = mask.cpu()
@@ -1261,12 +1267,15 @@ for real_a, real_b in eval_loader:
     for i in range(fake_b.size(0)):
         save_image(real_b[i], os.path.join(REAL_DIR, f"{n}.png"))
         save_image(fake_b[i], os.path.join(FAKE_DIR, f"{n}.png"))
+        save_image(real_a[i], os.path.join(INPUT_DIR, f"{n}.png"))
         if mask is not None:
             save_image(mask[i], os.path.join(MASK_DIR, f"{n}.png"))
         n += 1
     if n == MAX_EVAL_IMAGES:
         break
-print("%d images in %.1f min (%d steps, %s)" % (n, (time.time() - start) / 60, opt.sample_steps, opt.solver))
+nfe = 2 * opt.sample_steps - 1 if opt.solver == "heun" else opt.sample_steps
+print("%d images in %.1f min; sampling: %.3f s per image, %d generator calls (%d %s steps)" % (
+    n, (time.time() - start) / 60, sample_time / max(n, 1), nfe, opt.sample_steps, opt.solver))
 if tp + fp + fn > 0:
     print("predicted vs true mask: precision %.4f  recall %.4f  F1 %.4f  IoU %.4f" % (
         tp / max(1, tp + fp), tp / max(1, tp + fn), 2 * tp / (2 * tp + fp + fn), tp / (tp + fp + fn)))
@@ -1288,24 +1297,71 @@ metrics_dict = torch_fidelity.calculate_metrics(
 print(metrics_dict)
 
 # %% [markdown]
-# # Compute PSNR / SSIM
+# # Compute PSNR / SSIM / LPIPS
 #
-# The PSNR cell of the old notebook subtracted `uint8` images (`cv2.imread`) directly. `img1 - img2` then wraps around modulo 256, so large errors are counted as small ones and the PSNR comes out too high (e.g. 33.9 dB instead of 13.7 dB for a badly filled 128x128 hole). The images are converted to float here. For a like-for-like comparison, run this cell on the old WavTRGAN outputs as well (point `REAL_DIR` / `FAKE_DIR` to `Real_images1` / `fake_images1`).
+# Overall and grouped by the fraction of corrupted pixels of each test image (computed from `INPUT_DIR` and `REAL_DIR`). LPIPS uses AlexNet features (lower is better). The PSNR cell of the old notebook subtracted `uint8` images (`cv2.imread`) directly. `img1 - img2` then wraps around modulo 256, so large errors are counted as small ones and the PSNR comes out too high (e.g. 33.9 dB instead of 13.7 dB for a badly filled 128x128 hole). The images are converted to float here. For a like-for-like comparison, run this cell on the old WavTRGAN outputs as well (point `REAL_DIR` / `FAKE_DIR` to `Real_images1` / `fake_images1`).
 
 # %%
+import lpips
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
-GRAYSCALE = False   # True: luminance only, like the old notebook's cv2 grayscale conversion
+GRAYSCALE = False   # True: PSNR/SSIM on luminance only, like the old notebook's cv2 grayscale conversion
+RATIO_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1.0]   # bins of the corrupted fraction for the per-bin results
 
-psnr_list, ssim_list = [], []
+lpips_fn = lpips.LPIPS(net="alex", verbose=False).to(device).eval()
+
+
+def load_rgb01(folder, name):
+    return TF.to_tensor(Image.open(os.path.join(folder, name)).convert("RGB"))[None]
+
+
+psnr_list, ssim_list, lpips_list, ratio_list = [], [], [], []
 names = sorted((f for f in os.listdir(FAKE_DIR) if is_image_file(f)), key=lambda f: int(os.path.splitext(f)[0]))
-for name in names:
-    mode = "L" if GRAYSCALE else "RGB"
-    gt = np.asarray(Image.open(os.path.join(REAL_DIR, name)).convert(mode), dtype=np.float64)
-    pr = np.asarray(Image.open(os.path.join(FAKE_DIR, name)).convert(mode), dtype=np.float64)
-    psnr_list.append(peak_signal_noise_ratio(gt, pr, data_range=255))
-    ssim_list.append(structural_similarity(gt, pr, data_range=255, channel_axis=None if GRAYSCALE else 2))
-print("PSNR: %.3f dB   SSIM: %.4f   (%d images)" % (np.mean(psnr_list), np.mean(ssim_list), len(names)))
+with torch.no_grad():
+    for name in names:
+        mode = "L" if GRAYSCALE else "RGB"
+        gt = np.asarray(Image.open(os.path.join(REAL_DIR, name)).convert(mode), dtype=np.float64)
+        pr = np.asarray(Image.open(os.path.join(FAKE_DIR, name)).convert(mode), dtype=np.float64)
+        psnr_list.append(peak_signal_noise_ratio(gt, pr, data_range=255))
+        ssim_list.append(structural_similarity(gt, pr, data_range=255, channel_axis=None if GRAYSCALE else 2))
+        gt_t, pr_t = load_rgb01(REAL_DIR, name), load_rgb01(FAKE_DIR, name)
+        lpips_list.append(lpips_fn(pr_t.to(device) * 2 - 1, gt_t.to(device) * 2 - 1).item())
+        if os.path.exists(os.path.join(INPUT_DIR, name)):
+            ratio_list.append(corruption_mask(load_rgb01(INPUT_DIR, name), gt_t).mean().item())
+print("PSNR: %.3f dB   SSIM: %.4f   LPIPS: %.4f   (%d images)" % (
+    np.mean(psnr_list), np.mean(ssim_list), np.mean(lpips_list), len(names)))
+if len(ratio_list) == len(names):
+    ratios, metrics = np.array(ratio_list), np.array([psnr_list, ssim_list, lpips_list])
+    for lo, hi in zip(RATIO_EDGES[:-1], RATIO_EDGES[1:]):
+        idx = (ratios > lo) & (ratios <= hi)
+        if idx.any():
+            p, s, l = metrics[:, idx].mean(axis=1)
+            print("corrupted %3d-%3d%%: PSNR %.3f dB   SSIM %.4f   LPIPS %.4f   (%d images)" % (
+                100 * lo, 100 * hi, p, s, l, idx.sum()))
+
+# %% [markdown]
+# # Diversity (optional)
+#
+# Draws `DIV_SAMPLES` completions of each of the first `DIV_IMAGES` test images and reports the mean pairwise LPIPS between them (higher = more diverse; 0 for a deterministic method). With the mask-guided output, the pixels kept from the input are identical in all samples, so only the corrupted region contributes.
+
+# %%
+DIV_IMAGES, DIV_SAMPLES = 100, 5
+
+div_scores, n = [], 0
+div_gen = torch.Generator(device=device).manual_seed(opt.seed + 1)
+div_loader = DataLoader(get_test_set(opt.root_path, opt.direction), batch_size=opt.test_batch_size, shuffle=False)
+with torch.no_grad():
+    for real_a, _ in div_loader:
+        cond = to_model_range(real_a[:DIV_IMAGES - n].to(device))
+        samples = [inpaint(eval_g, cond, noise=torch.randn(cond.shape, device=device, generator=div_gen))[0]
+                   for _ in range(DIV_SAMPLES)]
+        for i in range(DIV_SAMPLES):
+            for j in range(i + 1, DIV_SAMPLES):
+                div_scores.append(lpips_fn(samples[i].clamp(-1, 1), samples[j].clamp(-1, 1)).flatten().cpu())
+        n += cond.size(0)
+        if n == DIV_IMAGES:
+            break
+print("diversity: mean pairwise LPIPS %.4f (%d samples per image, %d images)" % (torch.cat(div_scores).mean(), DIV_SAMPLES, n))
 
 # %% [markdown]
 # # Visualize the wavelet impact on attention (optional)
