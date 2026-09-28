@@ -82,7 +82,9 @@ opt = SimpleNamespace(
     lambda_per=0.1,
     lambda_style=250.0,
     lambda_gan=0.1,
-    lambda_gp=10.0,
+    lambda_gp=0.0,              # gradient penalty on D; off: spectral normalization already bounds D (see the losses cell)
+    d_norm="none",              # discriminator normalization: "none" = SN-PatchGAN (recommended), "batch" = WavTRGAN
+    d_init="normal",            # discriminator initialization N(0, 0.02) as in pix2pix ("xavier" * 0.02 = WavTRGAN)
     aux_weighting="t",          # per-sample weight of the x1_hat losses: "t", "t2" or "none"
 
     # mask prediction (blind: the network never receives the mask, it learns to predict it)
@@ -767,6 +769,8 @@ def aux_weight(t):
 # # Pix2Pix discriminator and auxiliary losses (from WavTRGAN)
 #
 # Only built when their weights are > 0. The perceptual and style losses are the WavTRGAN ones, but return one value per sample so they can be weighted by `t`.
+#
+# The discriminator is the WavTRGAN PatchGAN with spectral normalization, but by default without BatchNorm (`opt.d_norm = "none"`, the SN-PatchGAN used in inpainting), initialized with N(0, 0.02) as in pix2pix, and without gradient penalty. With the earlier settings (WavTRGAN's BatchNorm and xavier * 0.02 initialization, plus a gradient penalty of weight 10) it never learned to separate real and generated images: its loss stayed at 0.5, the value of a discriminator that outputs 0.5 for everything. The penalty is computed on the sum of the ~900 patch outputs and lets the scores of real and generated patches differ by only a few hundredths; without it, the tiny initialization made the discriminator unstable, and with BatchNorm it learned much more slowly.
 
 # %%
 import functools
@@ -850,10 +854,15 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm="batch", use_sigmoid=False,
 class NLayerDiscriminator(nn.Module):
     def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
         super().__init__()
-        if type(norm_layer) == functools.partial:
+        if norm_layer is None:   # no normalization layers: spectral normalization alone (SN-PatchGAN)
+            use_bias = True
+        elif type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
             use_bias = norm_layer == nn.InstanceNorm2d
+
+        def norm(channels):
+            return [norm_layer(channels)] if norm_layer is not None else []
 
         kw = 4
         padw = 1
@@ -869,7 +878,7 @@ class NLayerDiscriminator(nn.Module):
             sequence += [
                 nn.utils.spectral_norm(nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
                                                  kernel_size=kw, stride=2, padding=padw, bias=use_bias)),
-                norm_layer(ndf * nf_mult),
+                *norm(ndf * nf_mult),
                 nn.LeakyReLU(0.2, True)
             ]
 
@@ -878,7 +887,7 @@ class NLayerDiscriminator(nn.Module):
         sequence += [
             nn.utils.spectral_norm(nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult,
                                              kernel_size=kw, stride=1, padding=padw, bias=use_bias)),
-            norm_layer(ndf * nf_mult),
+            *norm(ndf * nf_mult),
             nn.LeakyReLU(0.2, True)
         ]
         sequence += [nn.utils.spectral_norm(nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw))]
@@ -904,7 +913,9 @@ class GANLoss(nn.Module):
 
 def gradient_penalty(D, real_ab, fake_ab):
     """Gradient penalty on random interpolations between real and fake (input, output) pairs.
-    WavTRGAN's version drew alpha from N(0, 1) instead of U(0, 1) and fed image-only pairs to D."""
+    WavTRGAN's version drew alpha from N(0, 1) instead of U(0, 1) and fed image-only pairs to D.
+    Off by default (opt.lambda_gp = 0): on the sum of the PatchGAN outputs it is so strong that D cannot
+    separate real and generated images."""
     alpha = torch.rand(real_ab.size(0), 1, 1, 1, device=real_ab.device)
     interpolates = (alpha * real_ab + (1 - alpha) * fake_ab).requires_grad_(True)
     gradients = torch.autograd.grad(D(interpolates).sum(), interpolates, create_graph=True)[0]
@@ -1041,6 +1052,8 @@ def warm_start_from_gan(net, path):
 # Checkpoints: `checkpoint/flow_latest.pth` (everything needed to resume, overwritten every epoch) and `checkpoint/flow_ema_epoch_N.pth` (EMA generator, for evaluation). On Kaggle, set `opt.max_epochs_per_run` so that a run finishes within the 12-hour limit, then continue in a new session with `opt.resume`.
 #
 # To add the mask head to a run trained without it, warm-start instead of resuming: `opt.init_from_gan = ".../checkpoint/flow_latest.pth"`, `opt.resume = ""`, and `opt.epoch_count` = the next epoch (e.g. 8) to keep the epoch numbering and the learning-rate schedule. The image generator (the EMA weights of that run) and the discriminator continue from the checkpoint; the mask head and the optimizer states start fresh. Before training, `samples/true_masks.jpg` shows the training target of the mask head for the preview images: it should cover the corrupted strokes.
+#
+# Checkpoints saved before the discriminator fix can be resumed as usual: their discriminator, which had not learned to separate real and generated images, is replaced by a new one (see the losses cell), and everything else continues. With a working discriminator the D loss (`Loss_D`) stays below 0.5.
 
 # %%
 from torch.utils.data import DataLoader
@@ -1071,14 +1084,24 @@ ema_g = copy.deepcopy(net_g).eval().requires_grad_(False)
 optimizer_g = torch.optim.AdamW(net_g.parameters(), lr=opt.lr_g, betas=(0.9, 0.99), weight_decay=0.0)
 print("generator: %.1fM parameters" % (sum(p.numel() for p in net_g.parameters()) / 1e6))
 
+def same_discriminator(ckpt):
+    """True if the checkpoint's discriminator has the current settings. Discriminators with the earlier settings
+    never learned to separate real and generated images (D loss stuck at 0.5), so a new one is trained instead."""
+    cfg = ckpt.get("opt", {})
+    same = cfg.get("d_norm", "batch") == opt.d_norm and cfg.get("d_init", "xavier") == opt.d_init
+    if not same:
+        print("===> the checkpoint's discriminator has the earlier settings: training a new discriminator")
+    return same
+
+
 use_gan = opt.lambda_gan > 0
 if use_gan:
-    net_d = define_D(6, 64, "basic", init_type="xavier", init_gain=0.02, gpu_id=device)
+    net_d = define_D(6, 64, "basic", norm=opt.d_norm, init_type=opt.d_init, init_gain=0.02, gpu_id=device)
     optimizer_d = torch.optim.Adam(net_d.parameters(), lr=opt.lr_d, betas=(opt.beta1_d, 0.999))
     criterionGAN = GANLoss().to(device)
     if opt.init_from_gan and not opt.resume:   # a WavTR-Flow checkpoint also holds its discriminator
         src = torch.load(opt.init_from_gan, map_location="cpu", weights_only=False, pickle_module=_lenient_pickle)
-        if isinstance(src, dict) and "net_d" in src:
+        if isinstance(src, dict) and "net_d" in src and same_discriminator(src):
             net_d.load_state_dict(src["net_d"])
             print("warm start: discriminator loaded")
         del src
@@ -1095,7 +1118,7 @@ if opt.resume:
     net_g.load_state_dict(ckpt["net_g"])
     ema_g.load_state_dict(ckpt["ema_g"])
     optimizer_g.load_state_dict(ckpt["optimizer_g"])
-    if use_gan and "net_d" in ckpt:
+    if use_gan and "net_d" in ckpt and same_discriminator(ckpt):
         net_d.load_state_dict(ckpt["net_d"])
         optimizer_d.load_state_dict(ckpt["optimizer_d"])
     opt.epoch_count = ckpt["epoch"] + 1
