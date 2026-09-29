@@ -90,7 +90,7 @@ opt = SimpleNamespace(
     # mask prediction (blind: the network never receives the mask, it learns to predict it)
     mask_head=True,             # extra output head that predicts the corrupted region
     lambda_mask=1.0,            # weight of its binary cross-entropy loss
-    mask_gt_threshold=0.1,      # its training target: pixels where input and ground truth differ by more than this
+    mask_gt_threshold=0.05,     # its training target: pixels where input and ground truth differ by more than this
     composite=True,             # test time: keep the input pixels that the network predicts as uncorrupted
     composite_threshold=0.2,    # ... i.e. where the predicted mask is below this (< 0.5: when unsure, regenerate)
 
