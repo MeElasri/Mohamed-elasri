@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>L'ordinateur de l'intérieur — Tronc commun</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+:root{
+  --ink:#16211f; --muted:#56635f; --line:#cfd8d4;
+  --board:#0e5b52; --soft-board:#e3efeb; --copper:#b0531c; --soft-copper:#f7e8dd;
+  --c-in:#0d7a6c; --c-out:#b0531c; --c-io:#6a4c9c; --c-store:#2c5a96;
+  --f-display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --f-body:"Atkinson Hyperlegible","DejaVu Sans",Arial,sans-serif;
+  --f-mono:"JetBrains Mono","DejaVu Sans Mono",monospace;
+}
+@page{size:A4;margin:16mm 15mm 18mm}
+*{box-sizing:border-box}
+html,body{margin:0;background:#fff;color:var(--ink)}
+body{font-family:var(--f-body);font-size:10.6pt;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+h1,h2,h3{font-family:var(--f-display);font-stretch:112%;line-height:1.15;margin:0;text-wrap:balance}
+h2{font-size:17pt;font-weight:800;margin-bottom:2mm}
+h3{font-size:11.5pt;font-weight:700;margin-bottom:1.5mm}
+p{margin:0 0 2.2mm}
+ul,ol{margin:0 0 2.5mm;padding-left:5.5mm}
+li{margin-bottom:.8mm}
+.label{font-family:var(--f-mono);font-size:7.2pt;letter-spacing:.09em;text-transform:uppercase;color:var(--copper);font-weight:700;margin-bottom:1mm}
+section{margin-bottom:7mm}
+.break{break-before:page}
+.avoid{break-inside:avoid}
+
+/* Couverture */
+.cover{border:2px solid var(--board);border-radius:4mm;padding:7mm 9mm 6mm;margin-bottom:6mm;background:var(--soft-board)}
+.cover h1{font-size:30pt;font-weight:800;font-stretch:118%;letter-spacing:-.01em;margin:1mm 0 3mm}
+.cover h1 em{font-style:normal;color:var(--copper)}
+.cover .lead{font-size:11.5pt;max-width:150mm}
+.fields{display:flex;gap:6mm;margin-top:5mm;font-size:9.5pt}
+.fields span{flex:1;border-bottom:1px solid var(--muted);padding-bottom:1mm;color:var(--muted)}
+.obj{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin-bottom:6mm}
+.box{border:1px solid var(--line);border-radius:2.5mm;padding:4mm 5mm}
+.box ul{margin:0}
+
+/* Définitions */
+.defs{display:grid;grid-template-columns:1fr 1fr;gap:3mm;margin-bottom:4mm}
+.def{border-top:2.5px solid var(--board);background:#f6f8f7;padding:3mm 4mm}
+.def b{font-family:var(--f-display);font-stretch:110%;display:block;margin-bottom:.8mm}
+.def span{font-size:9.6pt;color:var(--muted)}
+.eq{display:flex;align-items:center;gap:2.5mm;font-family:var(--f-display);font-weight:700;font-size:10.5pt;margin-bottom:3mm}
+.eq span{padding:2mm 3.5mm;border-radius:1.5mm;background:var(--soft-board);color:var(--board)}
+.eq span.cu{background:var(--soft-copper);color:var(--copper)}
+.eq small{display:block;font-family:var(--f-body);font-weight:400;font-size:8pt;color:var(--muted)}
+
+/* Schéma */
+.diagram{display:grid;grid-template-columns:30mm 7mm 1fr 7mm 30mm;grid-template-areas:"in a1 uc a2 out" ". . a3 . ." ". . ms . .";align-items:center;margin:3mm 0 4mm}
+.arrow{text-align:center;color:var(--muted);font-family:var(--f-mono);font-size:14pt}
+.a1{grid-area:a1}.a2{grid-area:a2}.a3{grid-area:a3;padding:1mm 0}
+.blk{border:1.3px solid var(--line);border-radius:1.8mm;background:#fff;overflow:hidden}
+.blk .hd{font-family:var(--f-mono);font-size:6.6pt;letter-spacing:.07em;text-transform:uppercase;padding:1.3mm 2.5mm;color:#fff;font-weight:700}
+.blk .bd{padding:2mm 2.5mm;font-size:8.6pt;line-height:1.35}
+.blk .bd b{font-family:var(--f-display);font-size:9.4pt;display:block}
+.blk .bd span{color:var(--muted)}
+.b-in{grid-area:in}.b-in .hd{background:var(--c-in)}
+.b-out{grid-area:out}.b-out .hd{background:var(--c-out)}
+.b-ms{grid-area:ms;justify-self:center;width:60mm}.b-ms .hd{background:var(--c-store)}
+.uc{grid-area:uc;border:1.8px solid var(--board);border-radius:3mm;padding:7mm 3mm 3mm;position:relative;display:grid;grid-template-columns:1fr 9mm 1fr;gap:2mm;background:var(--soft-board)}
+.uc > .label{position:absolute;top:1.8mm;left:3mm;color:var(--board)}
+.uc .col{display:grid;gap:2mm;border:1px dashed var(--board);border-radius:2mm;padding:2mm;align-content:start}
+.uc .col > .label{color:var(--board);margin:0}
+.uc .blk .hd{background:var(--board)}
+.bus{writing-mode:vertical-rl;font-family:var(--f-mono);font-size:6.5pt;letter-spacing:.2em;text-transform:uppercase;background:repeating-linear-gradient(90deg,var(--copper) 0 1px,transparent 1px 3.5px);display:grid;place-items:center;border-radius:1mm}
+.bus span{background:var(--soft-board);padding:1.5mm .3mm;font-weight:700}
+
+/* Étapes */
+.steps{counter-reset:s;list-style:none;padding:0;display:grid;gap:1.6mm}
+.steps li{display:grid;grid-template-columns:7mm 1fr;gap:2mm;align-items:start;margin:0}
+.steps li::before{counter-increment:s;content:counter(s);font-family:var(--f-mono);font-weight:700;font-size:8.5pt;background:var(--copper);color:#fff;border-radius:50%;width:5.5mm;height:5.5mm;display:grid;place-items:center;margin-top:.3mm}
+.steps code{font-family:var(--f-mono);font-size:8.6pt;background:#f1f3f2;padding:0 1mm;border-radius:1mm}
+
+/* Tableaux */
+table{border-collapse:collapse;width:100%;font-size:9.2pt;margin-bottom:4mm}
+th,td{text-align:left;padding:2mm 2.5mm;border:1px solid var(--line);vertical-align:top}
+th{font-family:var(--f-mono);font-size:6.8pt;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#f3f6f5}
+td:first-child{font-weight:700}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:4mm;margin-bottom:4mm}
+
+.periph{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin-bottom:4mm}
+.periph div{border-top:2.5px solid;padding:2.5mm 3mm;background:#f6f8f7;font-size:9.3pt}
+.periph b{font-family:var(--f-display);display:block;margin-bottom:.8mm}
+.units{display:flex;align-items:center;gap:2mm;flex-wrap:wrap;font-family:var(--f-mono);font-size:8.6pt;margin-bottom:4mm}
+.units span{background:var(--soft-board);color:var(--board);padding:1.6mm 2.6mm;border-radius:1.2mm;font-weight:700}
+.units i{font-style:normal;color:var(--muted);font-size:7.5pt}
+.note{border-left:3px solid var(--copper);background:var(--soft-copper);padding:2.5mm 4mm;font-size:9.4pt;margin-bottom:4mm}
+
+/* Exercices */
+.ex{border:1.5px dashed var(--board);border-radius:2.5mm;padding:4mm 5mm;margin-bottom:5mm;break-inside:avoid}
+.ex .label{color:var(--board)}
+.ex table td:first-child{font-weight:400}
+.cb{display:inline-block;width:3.6mm;height:3.6mm;border:1.2px solid var(--ink);border-radius:.6mm;vertical-align:-.6mm;margin-right:1.2mm}
+.blank{display:inline-block;border-bottom:1px solid var(--ink);min-width:28mm}
+.line{border-bottom:1px dotted var(--muted);height:6.5mm}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:2.5mm}
+.grid4 div{border:1px solid var(--line);border-radius:1.5mm;min-height:24mm;padding:1.5mm 2mm;font-family:var(--f-mono);font-size:7pt;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.wordbank{display:flex;flex-wrap:wrap;gap:1.6mm;margin-bottom:3mm}
+.wordbank span{border:1px solid var(--line);border-radius:5mm;padding:.6mm 3mm;font-size:9pt}
+.qcm{display:grid;grid-template-columns:1fr 1fr;gap:3mm 7mm}
+.qcm .q{break-inside:avoid;font-size:9.6pt}
+.qcm .q p{font-weight:700;margin-bottom:1mm}
+.qcm .q div{margin-bottom:.5mm}
+.tf td:nth-child(2),.tf td:nth-child(3){width:13mm;text-align:center}
+
+/* Corrigé */
+.key{font-size:9.6pt}
+.key .ok{color:var(--board);font-weight:700}
+.recap{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}
+.recap .box{font-size:9.3pt}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="label">Tronc commun · Informatique · Chapitre 1</div>
+  <h1>L'ordinateur <em>de l'intérieur</em></h1>
+  <p class="lead">Structure de base d'un ordinateur : cours, schéma fonctionnel, exercices d'application et corrigé.</p>
+  <div class="fields"><span>Nom et prénom :</span><span>Classe :</span><span>Date :</span></div>
+</div>
+
+<div class="obj">
+  <div class="box"><div class="label">Objectifs</div><ul>
+    <li>Définir l'informatique, l'information et le système informatique.</li>
+    <li>Représenter et expliquer le schéma fonctionnel d'un ordinateur.</li>
+    <li>Décrire le rôle du processeur et des mémoires.</li>
+    <li>Classer les périphériques et convertir les unités de mesure.</li></ul></div>
+  <div class="box"><div class="label">Plan</div><ol>
+    <li>Définitions</li><li>Schéma fonctionnel</li><li>L'unité centrale</li><li>Les périphériques</li><li>Unités de mesure</li><li>Exercices et corrigé</li></ol></div>
+</div>
+
+<section>
+  <div class="label">Partie 1</div>
+  <h2>Informatique, information, ordinateur</h2>
+  <div class="defs">
+    <div class="def"><b>Information</b><span>Élément de connaissance (texte, nombre, image, son, vidéo) qui peut être codé, stocké, traité et transmis.</span></div>
+    <div class="def"><b>Informatique</b><span>Science du traitement automatique et rationnel de l'information à l'aide de machines : les ordinateurs. (INFORmation + autoMATIQUE)</span></div>
+    <div class="def"><b>Ordinateur</b><span>Machine électronique programmable qui reçoit des données, les traite selon des instructions (programmes) et produit des résultats.</span></div>
+    <div class="def"><b>Système informatique</b><span>Ensemble formé par le matériel et les logiciels qui travaillent ensemble pour traiter l'information.</span></div>
+  </div>
+  <div class="eq"><span>Système informatique</span> = <span>Matériel<small>(hardware) : partie physique, on peut la toucher</small></span> + <span class="cu">Logiciel<small>(software) : programmes, on ne peut pas les toucher</small></span></div>
+  <p>Il existe deux familles de logiciels : les <b>logiciels de base</b> (le système d'exploitation : Windows, Linux, Android) qui font fonctionner la machine, et les <b>logiciels d'application</b> (traitement de texte, navigateur, jeux) qui servent à l'utilisateur.</p>
+</section>
+
+<section class="avoid">
+  <div class="label">Partie 2</div>
+  <h2>Le schéma fonctionnel d'un ordinateur</h2>
+  <p>Tout ordinateur suit le même principe : <b>entrée → traitement → sortie</b>, avec une mémoire pour garder les données. Ce modèle s'appelle l'<b>architecture de Von Neumann</b> (1945).</p>
+  <div class="diagram">
+    <div class="blk b-in"><div class="hd">Unités d'entrée</div><div class="bd"><b>Entrée</b><span>clavier, souris, scanner…</span></div></div>
+    <div class="arrow a1">→</div>
+    <div class="uc"><span class="label">Unité centrale</span>
+      <div class="col"><span class="label">Processeur (CPU)</span>
+        <div class="blk"><div class="hd">UC</div><div class="bd"><b>Unité de commande</b><span>dirige et coordonne</span></div></div>
+        <div class="blk"><div class="hd">UAL</div><div class="bd"><b>Unité arithmétique et logique</b><span>calcule et compare</span></div></div></div>
+      <div class="bus"><span>Bus</span></div>
+      <div class="col"><span class="label">Mémoire centrale</span>
+        <div class="blk"><div class="hd">RAM</div><div class="bd"><b>Mémoire vive</b><span>données en cours</span></div></div>
+        <div class="blk"><div class="hd">ROM</div><div class="bd"><b>Mémoire morte</b><span>programme de démarrage</span></div></div></div>
+    </div>
+    <div class="arrow a2">→</div>
+    <div class="blk b-out"><div class="hd">Unités de sortie</div><div class="bd"><b>Sortie</b><span>écran, imprimante…</span></div></div>
+    <div class="arrow a3">⇅</div>
+    <div class="blk b-ms"><div class="hd">Mémoires de masse</div><div class="bd"><b>Stockage</b><span>disque dur, SSD, clé USB</span></div></div>
+  </div>
+  <h3>Exemple : le trajet du calcul 7 + 5</h3>
+  <ol class="steps">
+    <li><span><b>Entrée</b> : l'élève tape 7 + 5 au clavier, qui transforme chaque touche en binaire (« 7 » → <code>00110111</code>).</span></li>
+    <li><span><b>Mémorisation</b> : les codes circulent sur le bus et sont rangés dans la RAM.</span></li>
+    <li><span><b>Commande</b> : l'unité de commande lit l'instruction « additionner », la décode et donne l'ordre de calculer.</span></li>
+    <li><span><b>Traitement</b> : l'UAL calcule en binaire <code>0111 + 0101 = 1100</code>, soit 12.</span></li>
+    <li><span><b>Résultat</b> : 12 est rangé dans la RAM.</span></li>
+    <li><span><b>Sortie</b> : le résultat est envoyé à l'écran, qui affiche 12.</span></li>
+    <li><span><b>Stockage</b> : si l'élève enregistre, le fichier est copié sur le disque dur et sera conservé après l'arrêt.</span></li>
+  </ol>
+</section>
+
+<section class="break">
+  <div class="label">Partie 3</div>
+  <h2>L'unité centrale : processeur et mémoire centrale</h2>
+  <div class="note">Attention : dans la vie courante, on appelle « unité centrale » la tour (le boîtier). En cours d'informatique, l'<b>unité centrale</b> désigne le <b>processeur + la mémoire centrale</b>.</div>
+  <div class="two">
+    <div class="box"><h3>Le processeur (CPU)</h3>
+      <p>C'est le « cerveau » : il exécute les instructions des programmes. Sa vitesse est sa <b>fréquence</b>, en <b>gigahertz (GHz)</b> : 3,2 GHz = 3,2 milliards de cycles par seconde.</p>
+      <ul><li><b>Unité de commande (UC)</b> : cherche les instructions en mémoire, les décode et donne les ordres.</li>
+      <li><b>UAL</b> : calculs (+, −, ×, ÷) et comparaisons (=, &lt;, &gt;, ET, OU).</li>
+      <li><b>Registres</b> : petites mémoires très rapides dans le processeur.</li></ul></div>
+    <div class="box"><h3>La carte mère et les bus</h3>
+      <p>La <b>carte mère</b> est le circuit imprimé qui porte le processeur, les barrettes de RAM, la ROM (BIOS), les cartes d'extension et les connecteurs (USB, HDMI, réseau…).</p>
+      <p>Les <b>bus</b> transportent les informations entre les composants :</p>
+      <ul><li>bus de données : les données ;</li><li>bus d'adresses : où lire ou écrire ;</li><li>bus de commande : les ordres.</li></ul></div>
+  </div>
+  <table>
+    <thead><tr><th>Mémoire</th><th>Rôle</th><th>Accès</th><th>Sans courant</th><th>Exemple</th></tr></thead>
+    <tbody>
+      <tr><td>RAM (mémoire vive)</td><td>Programmes et données en cours d'utilisation</td><td>Lecture et écriture</td><td>Contenu perdu (volatile)</td><td>Barrette de 8 Go</td></tr>
+      <tr><td>ROM (mémoire morte)</td><td>Programme de démarrage (BIOS / UEFI)</td><td>Lecture seule</td><td>Contenu conservé</td><td>Puce BIOS</td></tr>
+      <tr><td>Mémoire de masse</td><td>Fichiers et logiciels à long terme</td><td>Lecture et écriture</td><td>Contenu conservé</td><td>Disque dur, SSD, clé USB</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <div class="label">Partie 4</div>
+  <h2>Les périphériques</h2>
+  <p>Un <b>périphérique</b> est un appareil branché à l'unité centrale. On le classe selon le sens de circulation de l'information.</p>
+  <div class="periph">
+    <div style="border-color:var(--c-in)"><b>Entrée</b>De l'utilisateur vers l'ordinateur : clavier, souris, scanner, microphone, webcam.</div>
+    <div style="border-color:var(--c-out)"><b>Sortie</b>De l'ordinateur vers l'utilisateur : écran, imprimante, haut-parleurs, vidéoprojecteur.</div>
+    <div style="border-color:var(--c-io)"><b>Entrée / sortie</b>Dans les deux sens : écran tactile, modem, imprimante multifonction, casque-micro.</div>
+    <div style="border-color:var(--c-store)"><b>Stockage</b>Mémoires de masse : disque dur, SSD, clé USB, carte SD, DVD.</div>
+  </div>
+</section>
+
+<section class="avoid">
+  <div class="label">Partie 5</div>
+  <h2>Mesurer la mémoire : bits et octets</h2>
+  <p>L'ordinateur ne connaît que deux états : le courant passe (1) ou ne passe pas (0). Ce chiffre s'appelle un <b>bit</b> (binary digit). <b>8 bits</b> forment un <b>octet</b>, qui code un caractère : la lettre A = <code style="font-family:var(--f-mono)">01000001</code>. On multiplie par <b>1024</b> (2<sup>10</sup>) pour passer à l'unité suivante :</p>
+  <div class="units"><span>1 octet = 8 bits</span><i>×1024 →</i><span>1 Ko</span><i>×1024 →</i><span>1 Mo</span><i>×1024 →</i><span>1 Go</span><i>×1024 →</i><span>1 To</span></div>
+  <div class="note">Pour passer à une unité <b>plus petite</b>, on <b>multiplie</b> par 1024 ; pour passer à une unité <b>plus grande</b>, on <b>divise</b> par 1024. Les fabricants de disques utilisent souvent 1000 : un disque « 500 Go » affiche environ 465 Go.</div>
+</section>
+
+<section>
+  <div class="label">Partie 6</div>
+  <h2>Exercices</h2>
+
+  <div class="ex"><div class="label">Exercice 1 · Matériel ou logiciel ?</div>
+    <p>Coche la bonne case.</p>
+    <table><thead><tr><th>Élément</th><th>Matériel</th><th>Logiciel</th><th>Élément</th><th>Matériel</th><th>Logiciel</th></tr></thead><tbody>
+      <tr><td>Clavier</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Linux</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>Windows</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Barrette de RAM</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>Processeur</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Antivirus</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>Microsoft Word</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Imprimante</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>Navigateur Chrome</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Android</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>Carte mère</td><td><span class="cb"></span></td><td><span class="cb"></span></td><td>Disque dur</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="ex"><div class="label">Exercice 2 · Complète le schéma fonctionnel</div>
+    <p>Écris dans chaque case le nom du bloc. Mots à utiliser :</p>
+    <div class="wordbank"><span>Unités d'entrée</span><span>Unités de sortie</span><span>Unité de commande</span><span>UAL</span><span>RAM</span><span>ROM</span><span>Mémoires de masse</span><span>Bus</span></div>
+    <div class="diagram" style="margin-bottom:0">
+      <div class="blk b-in"><div class="bd" style="height:16mm">①</div></div>
+      <div class="arrow a1">→</div>
+      <div class="uc"><span class="label">Unité centrale</span>
+        <div class="col"><span class="label">Processeur</span><div class="blk"><div class="bd" style="height:10mm">②</div></div><div class="blk"><div class="bd" style="height:10mm">③</div></div></div>
+        <div class="bus"><span>⑥</span></div>
+        <div class="col"><span class="label">Mémoire centrale</span><div class="blk"><div class="bd" style="height:10mm">④</div></div><div class="blk"><div class="bd" style="height:10mm">⑤</div></div></div>
+      </div>
+      <div class="arrow a2">→</div>
+      <div class="blk b-out"><div class="bd" style="height:16mm">⑦</div></div>
+      <div class="arrow a3">⇅</div>
+      <div class="blk b-ms"><div class="bd" style="height:10mm">⑧</div></div>
+    </div>
+  </div>
+
+  <div class="ex"><div class="label">Exercice 3 · Vrai ou faux ?</div>
+    <table class="tf"><thead><tr><th>Affirmation</th><th>Vrai</th><th>Faux</th></tr></thead><tbody>
+      <tr><td>a. La RAM perd son contenu quand on éteint l'ordinateur.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>b. On peut écrire facilement des fichiers dans la ROM.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>c. L'UAL est la partie du processeur qui effectue les calculs.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>d. L'unité centrale est composée du processeur et de l'écran.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>e. Un processeur à 3 GHz est en général plus rapide qu'un processeur à 1,5 GHz de même génération.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+      <tr><td>f. La carte mère sert à stocker les photos de l'utilisateur.</td><td><span class="cb"></span></td><td><span class="cb"></span></td></tr>
+    </tbody></table>
+    <p>Corrige les affirmations fausses :</p>
+    <div class="line"></div><div class="line"></div>
+  </div>
+</section>
+
+<section>
+  <div class="ex"><div class="label">Exercice 4 · Classe les périphériques</div>
+    <p>Écris chaque périphérique dans la bonne colonne.</p>
+    <div class="wordbank"><span>Clavier</span><span>Écran</span><span>Disque dur</span><span>Scanner</span><span>Imprimante</span><span>Écran tactile</span><span>Clé USB</span><span>Microphone</span><span>Haut-parleurs</span><span>Modem</span><span>Webcam</span><span>SSD</span><span>Vidéoprojecteur</span><span>Casque-micro</span><span>Souris</span><span>Carte SD</span></div>
+    <div class="grid4"><div>Entrée</div><div>Sortie</div><div>Entrée / sortie</div><div>Stockage</div></div>
+  </div>
+
+  <div class="ex"><div class="label">Exercice 5 · Conversions</div>
+    <ol>
+      <li>Combien de bits y a-t-il dans 4 octets ? <span class="blank"></span> bits</li>
+      <li>Combien de Ko y a-t-il dans 3 Mo ? <span class="blank"></span> Ko</li>
+      <li>Combien de Mo y a-t-il dans 2 Go ? <span class="blank"></span> Mo</li>
+      <li>Un fichier fait 5120 Ko. Combien de Mo cela fait-il ? <span class="blank"></span> Mo</li>
+      <li>Une clé USB de 8 Go contient des chansons de 4 Mo chacune. Combien de chansons au maximum ? Détaille ton calcul.
+        <div class="line"></div><div class="line"></div></li>
+    </ol>
+  </div>
+
+  <div class="ex"><div class="label">Exercice 6 · QCM</div>
+    <p>Entoure la bonne réponse.</p>
+    <div class="qcm">
+      <div class="q"><p>1. Le « cerveau » de l'ordinateur est :</p><div>a. la mémoire vive</div><div>b. le processeur</div><div>c. le disque dur</div><div>d. la carte mère</div></div>
+      <div class="q"><p>2. L'unité centrale est formée de :</p><div>a. processeur + mémoire centrale</div><div>b. écran + clavier</div><div>c. disque dur + clé USB</div><div>d. souris + imprimante</div></div>
+      <div class="q"><p>3. Quelle mémoire est volatile ?</p><div>a. la ROM</div><div>b. le disque dur</div><div>c. la RAM</div><div>d. le DVD</div></div>
+      <div class="q"><p>4. La ROM contient :</p><div>a. les photos de l'utilisateur</div><div>b. le programme de démarrage (BIOS)</div><div>c. les programmes ouverts</div><div>d. les pages web visitées</div></div>
+      <div class="q"><p>5. UAL signifie :</p><div>a. Unité d'Accès Logique</div><div>b. Unité Arithmétique et Logique</div><div>c. Unité Automatique de Lecture</div><div>d. Unité d'Affichage Local</div></div>
+      <div class="q"><p>6. L'unité de commande sert à :</p><div>a. afficher les résultats</div><div>b. stocker les fichiers</div><div>c. lire, décoder les instructions et coordonner</div><div>d. relier l'ordinateur à Internet</div></div>
+      <div class="q"><p>7. Le scanner est un périphérique :</p><div>a. d'entrée</div><div>b. de sortie</div><div>c. de stockage</div><div>d. d'entrée / sortie</div></div>
+      <div class="q"><p>8. 1 octet est égal à :</p><div>a. 2 bits</div><div>b. 8 bits</div><div>c. 10 bits</div><div>d. 1024 bits</div></div>
+      <div class="q"><p>9. 1 Go est égal à :</p><div>a. 1000 Ko</div><div>b. 1024 Ko</div><div>c. 1024 Mo</div><div>d. 8 Mo</div></div>
+      <div class="q"><p>10. L'élément qui relie tous les composants est :</p><div>a. l'alimentation</div><div>b. le boîtier</div><div>c. la carte mère</div><div>d. le ventilateur</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="break">
+  <div class="label">Synthèse</div>
+  <h2>À retenir</h2>
+  <div class="recap" style="margin-bottom:7mm">
+    <div class="box"><div class="label">Structure</div><ul>
+      <li>Système informatique = matériel + logiciel.</li>
+      <li>Entrée → unité centrale → sortie, avec les mémoires de masse.</li>
+      <li>Unité centrale = processeur + mémoire centrale.</li></ul></div>
+    <div class="box"><div class="label">Composants</div><ul>
+      <li>Processeur = UC + UAL ; fréquence en GHz.</li>
+      <li>RAM : lecture/écriture, volatile. ROM : lecture seule, BIOS.</li>
+      <li>La carte mère relie tout par les bus.</li></ul></div>
+    <div class="box"><div class="label">Mesures</div><ul>
+      <li>1 octet = 8 bits.</li>
+      <li>1 Ko = 1024 o ; 1 Mo = 1024 Ko ; 1 Go = 1024 Mo ; 1 To = 1024 Go.</li></ul></div>
+  </div>
+
+  <div class="label">Pour l'enseignant</div>
+  <h2>Corrigé</h2>
+  <div class="key">
+    <h3>Exercice 1</h3>
+    <p><span class="ok">Matériel</span> : clavier, processeur, carte mère, barrette de RAM, imprimante, disque dur.<br><span class="ok">Logiciel</span> : Windows, Microsoft Word, navigateur Chrome, Linux, antivirus, Android.</p>
+    <h3>Exercice 2</h3>
+    <p>① Unités d'entrée · ② Unité de commande · ③ UAL · ④ RAM · ⑤ ROM · ⑥ Bus · ⑦ Unités de sortie · ⑧ Mémoires de masse.</p>
+    <h3>Exercice 3</h3>
+    <p>a. <span class="ok">Vrai</span> (mémoire volatile) · b. <span class="ok">Faux</span> : la ROM est en lecture seule · c. <span class="ok">Vrai</span> · d. <span class="ok">Faux</span> : unité centrale = processeur + mémoire centrale · e. <span class="ok">Vrai</span> · f. <span class="ok">Faux</span> : la carte mère relie les composants ; les photos sont sur une mémoire de masse.</p>
+    <h3>Exercice 4</h3>
+    <p><span class="ok">Entrée</span> : clavier, souris, scanner, microphone, webcam.<br>
+    <span class="ok">Sortie</span> : écran, imprimante, haut-parleurs, vidéoprojecteur.<br>
+    <span class="ok">Entrée / sortie</span> : écran tactile, modem, casque-micro.<br>
+    <span class="ok">Stockage</span> : disque dur, clé USB, SSD, carte SD.</p>
+    <h3>Exercice 5</h3>
+    <p>1. 4 × 8 = <span class="ok">32 bits</span> · 2. 3 × 1024 = <span class="ok">3072 Ko</span> · 3. 2 × 1024 = <span class="ok">2048 Mo</span> · 4. 5120 ÷ 1024 = <span class="ok">5 Mo</span> · 5. 8 Go = 8 × 1024 = 8192 Mo ; 8192 ÷ 4 = <span class="ok">2048 chansons</span>.</p>
+    <h3>Exercice 6</h3>
+    <p>1 b · 2 a · 3 c · 4 b · 5 b · 6 c · 7 a · 8 b · 9 c · 10 c</p>
+  </div>
+</section>
+
+</body>
+</html>

@@ -11,3 +11,6 @@ Cours pour les élèves de **tronc commun** (informatique, chapitre 1). Ouvrir `
 6. Quiz final de 10 questions corrigé
 
 Chaque partie a une activité corrigée automatiquement. La progression est gardée dans le navigateur de l'élève.
+
+## Version PDF
+`cours-structure-ordinateur.pdf` (A4, 8 pages) : cours, schéma, 6 exercices à compléter sur papier et corrigé pour l'enseignant à la dernière page. La source est `version-imprimable.html`.
