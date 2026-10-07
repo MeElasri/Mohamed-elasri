@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L'ordinateur de l'intérieur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout : une colonne de lecture, des "plaques" de circuit pour les activités, un schéma fonctionnel en grille qui s'empile sur téléphone */
+:root{
+  --bg:#f2f4f1; --surface:#ffffff; --ink:#16211f; --muted:#56635f; --line:#d3dbd7;
+  --board:#0e5b52; --board-ink:#ffffff; --soft-board:#e0eeea;
+  --copper:#b0531c; --soft-copper:#f7e6da;
+  --c-in:#0d7a6c; --c-out:#b0531c; --c-io:#6a4c9c; --c-store:#2c5a96; --c-cpu:#0e5b52;
+  --ok:#2c7a31; --soft-ok:#e2f1e1; --bad:#b8352a; --soft-bad:#f8e1de;
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c1413; --surface:#141f1d; --ink:#e3ebe8; --muted:#9aaba6; --line:#293a36;
+  --board:#47b5a4; --board-ink:#06201c; --soft-board:#15322e;
+  --copper:#e48c55; --soft-copper:#38241a;
+  --c-in:#4cc2b1; --c-out:#e8935c; --c-io:#ab95de; --c-store:#7fa7e2; --c-cpu:#47b5a4;
+  --ok:#6cc070; --soft-ok:#1b301c; --bad:#f07264; --soft-bad:#3a1d1a;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0c1413; --surface:#141f1d; --ink:#e3ebe8; --muted:#9aaba6; --line:#293a36;
+  --board:#47b5a4; --board-ink:#06201c; --soft-board:#15322e;
+  --copper:#e48c55; --soft-copper:#38241a;
+  --c-in:#4cc2b1; --c-out:#e8935c; --c-io:#ab95de; --c-store:#7fa7e2; --c-cpu:#47b5a4;
+  --ok:#6cc070; --soft-ok:#1b301c; --bad:#f07264; --soft-bad:#3a1d1a;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.6;margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+h1,h2,h3{font-family:var(--f-display);font-stretch:112%;line-height:1.15;text-wrap:balance;margin:0}
+h2{font-size:clamp(1.6rem,4vw,2.1rem);font-weight:800}
+h3{font-size:1.15rem;font-weight:700}
+p{margin:0}
+.prose{max-width:66ch;display:grid;gap:12px}
+.label{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--copper);outline-offset:2px}
+.btn{border:1.5px solid var(--board);background:var(--board);color:var(--board-ink);border-radius:999px;padding:8px 18px;font-weight:700;font-size:.95rem}
+.btn.ghost{background:transparent;color:var(--board)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* En-tête */
+.hero{padding-block:40px 28px;display:grid;gap:18px}
+.hero h1{font-size:clamp(2.2rem,7vw,4rem);font-weight:800;font-stretch:118%;letter-spacing:-.01em}
+.hero h1 em{font-style:normal;color:var(--copper)}
+.hero .lead{font-size:1.15rem;max-width:58ch;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:8px 18px}
+.meta span{font-family:var(--f-mono);font-size:.78rem;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:700}
+
+/* Navigation des chapitres */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-20px;padding:10px 20px}
+.nav-in{max-width:980px;margin:0 auto;display:flex;gap:12px;align-items:center}
+.chips{display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--ink);border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px 4px 6px;font-size:.85rem;white-space:nowrap}
+.chip i{font-style:normal;font-family:var(--f-mono);font-size:.7rem;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:var(--soft-board);color:var(--board)}
+.chip.done i{background:var(--ok);color:var(--surface)}
+.prog{flex:none;font-family:var(--f-mono);font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:8px}
+.bar{width:70px;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.bar b{display:block;height:100%;width:0;background:var(--ok);transition:width .4s}
+
+/* Sections */
+section{padding-block:56px 8px;display:grid;gap:22px;scroll-margin-top:60px}
+.sec-head{display:grid;gap:6px}
+.sec-head .label{color:var(--copper)}
+.plate{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;display:grid;gap:14px;min-width:0}
+.plate > .label:first-child{color:var(--board)}
+.task{border:2px dashed var(--board);background:var(--soft-board)}
+.task-title{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.task-title .label{color:var(--board);font-weight:700}
+.feedback{font-weight:700;min-height:1.6em}
+.feedback.ok{color:var(--ok)} .feedback.bad{color:var(--bad)}
+
+/* Définitions */
+.defs{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.def{border-top:3px solid var(--board);background:var(--surface);padding:14px 16px;border-radius:0 0 var(--r) var(--r);display:grid;gap:6px;align-content:start}
+.def dt{font-family:var(--f-display);font-weight:700;font-stretch:110%}
+.def dd{margin:0;color:var(--muted);font-size:.95rem}
+.equation{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-family:var(--f-display);font-weight:700;font-size:1.1rem}
+.equation span{padding:8px 14px;border-radius:8px;background:var(--soft-board);color:var(--board)}
+.equation span.cu{background:var(--soft-copper);color:var(--copper)}
+.equation small{display:block;font-family:var(--f-body);font-weight:400;font-size:.8rem;color:var(--muted)}
+
+/* Tri matériel / logiciel */
+.sort-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.sort-row{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.sort-row .nm{font-weight:700;min-width:0}
+.sort-row .opts{display:flex;gap:4px;flex:none}
+.sort-row .opts button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:3px 8px;font-size:.8rem}
+.sort-row.ok{border-color:var(--ok);background:var(--soft-ok)}
+.sort-row.bad{border-color:var(--bad);background:var(--soft-bad)}
+.sort-row .opts button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+/* Schéma fonctionnel */
+.diagram{display:grid;grid-template-columns:1fr 34px 2.3fr 34px 1fr;grid-template-areas:"in a1 uc a2 out" ". . a3 . ." ". . ms . .";align-items:center;gap:0}
+.arrow{display:grid;place-items:center;color:var(--muted);font-family:var(--f-mono);font-size:1.3rem;user-select:none}
+.a1{grid-area:a1}.a2{grid-area:a2}.a3{grid-area:a3;padding-block:6px}
+.blk{border:1.5px solid var(--line);background:var(--surface);border-radius:8px;padding:0;text-align:left;color:var(--ink);display:grid;transition:transform .2s,box-shadow .2s,border-color .2s;width:100%}
+.blk .hd{font-family:var(--f-mono);font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;padding:6px 10px;color:var(--surface);border-radius:6px 6px 0 0;font-weight:700}
+.blk .bd{padding:10px;font-size:.9rem;display:grid;gap:2px}
+.blk .bd b{font-family:var(--f-display);font-size:1rem;font-stretch:108%}
+.blk .bd span{color:var(--muted);font-size:.82rem}
+.blk:hover{border-color:var(--copper)}
+.blk.sel{border-color:var(--copper);box-shadow:0 0 0 3px var(--soft-copper)}
+.blk.lit{border-color:var(--copper);box-shadow:0 0 0 4px var(--copper);transform:scale(1.03)}
+.b-in{grid-area:in}.b-in .hd{background:var(--c-in)}
+.b-out{grid-area:out}.b-out .hd{background:var(--c-out)}
+.b-ms{grid-area:ms}.b-ms .hd{background:var(--c-store)}
+.uc{grid-area:uc;border:2px solid var(--board);border-radius:12px;padding:30px 10px 10px;position:relative;display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:stretch;background:var(--soft-board)}
+.uc > .label{position:absolute;top:8px;left:12px;color:var(--board);font-weight:700}
+.uc .col{display:grid;gap:8px;align-content:start;border:1px dashed var(--board);border-radius:8px;padding:8px}
+.uc .col > .label{color:var(--board)}
+.uc .blk .hd{background:var(--c-cpu)}
+.bus{writing-mode:vertical-rl;font-family:var(--f-mono);font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;border:none;border-radius:6px;background:repeating-linear-gradient(90deg,var(--copper) 0 2px,transparent 2px 6px);color:var(--ink);padding:6px 4px;display:grid;place-items:center;min-width:26px}
+.bus span{background:var(--soft-board);padding:4px 1px}
+.bus.lit{box-shadow:0 0 0 3px var(--copper)}
+.info{border-left:4px solid var(--copper);background:var(--soft-copper);border-radius:0 var(--r) var(--r) 0;padding:14px 16px;display:grid;gap:6px}
+.info ul{margin:0;padding-left:20px}
+.sim{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:16px;align-items:start}
+.sim-text{min-height:5.2em}
+.screen{background:#0b1210;color:#7cf2c8;font-family:var(--f-mono);border-radius:8px;padding:14px;min-height:92px;border:6px solid #2a3330;display:grid;align-content:start;gap:4px;font-size:.95rem}
+.screen .lbl{color:#6f8b83;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase}
+.steps-dots{display:flex;gap:5px;flex-wrap:wrap}
+.steps-dots i{width:22px;height:6px;border-radius:3px;background:var(--line)}
+.steps-dots i.on{background:var(--copper)}
+.sim-ctrl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* Tableaux */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:.93rem}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;background:var(--bg)}
+tr:last-child td{border-bottom:none}
+td:first-child{font-weight:700}
+.cpu-parts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+
+/* Vrai/faux */
+.tf{display:grid;gap:8px}
+.tf-row{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;flex-wrap:wrap}
+.tf-row p{flex:1;min-width:200px}
+.tf-row .opts{display:flex;gap:6px}
+.tf-row .opts button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:4px 12px;font-weight:700}
+.tf-row.ok{border-color:var(--ok);background:var(--soft-ok)}
+.tf-row.bad{border-color:var(--bad);background:var(--soft-bad)}
+.tf-row .why{flex-basis:100%;font-size:.88rem;color:var(--muted)}
+
+/* Classement des périphériques */
+.pool{display:flex;flex-wrap:wrap;gap:8px;min-height:44px}
+.dev{border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 14px;font-weight:700;font-size:.92rem}
+.dev[aria-pressed="true"]{border-color:var(--copper);background:var(--soft-copper);box-shadow:0 0 0 2px var(--copper)}
+.dev.ok{border-color:var(--ok);background:var(--soft-ok);cursor:default}
+.bins{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.bin{border:2px solid var(--line);border-radius:var(--r);background:var(--surface);padding:0;text-align:left;color:var(--ink);display:grid;align-content:start;min-height:150px}
+.bin .hd{padding:8px 10px;color:var(--surface);font-family:var(--f-mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;border-radius:7px 7px 0 0}
+.bin .hint{padding:4px 10px;font-size:.78rem;color:var(--muted)}
+.bin .got{display:flex;flex-wrap:wrap;gap:5px;padding:8px 10px}
+.bin .got span{font-size:.8rem;border-radius:999px;padding:2px 9px;background:var(--bg);border:1px solid var(--line)}
+.bin.e .hd{background:var(--c-in)}.bin.s .hd{background:var(--c-out)}.bin.es .hd{background:var(--c-io)}.bin.m .hd{background:var(--c-store)}
+.bin.armed{border-color:var(--copper);border-style:dashed}
+.bin.shake{animation:shake .35s}
+@keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+
+/* Unités */
+.units{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-family:var(--f-mono);font-size:.85rem}
+.units span{padding:6px 10px;border-radius:6px;background:var(--soft-board);color:var(--board);font-weight:700}
+.units i{font-style:normal;color:var(--muted);font-size:.75rem}
+.conv{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.conv label{display:grid;gap:4px;font-size:.85rem;color:var(--muted)}
+input,select{font:inherit;font-size:1rem;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:8px;padding:8px 10px}
+input[type=number]{width:150px}
+.conv-out{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.conv-out div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid}
+.conv-out b{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.95rem;overflow-wrap:anywhere}
+.conv-out small{color:var(--muted);font-size:.75rem;font-family:var(--f-mono)}
+.ex{display:grid;gap:10px}
+.ex-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.ex-row p{flex:1 1 280px}
+.ex-row input{width:110px}
+.ex-row .fb{flex-basis:100%;font-size:.9rem;font-weight:700}
+.ex-row.ok{border-color:var(--ok);background:var(--soft-ok)} .ex-row.ok .fb{color:var(--ok)}
+.ex-row.bad{border-color:var(--bad);background:var(--soft-bad)} .ex-row.bad .fb{color:var(--bad)}
+
+/* Quiz */
+.q{display:grid;gap:8px;padding-block:14px;border-bottom:1px solid var(--line)}
+.q:last-of-type{border-bottom:none}
+.q legend{font-weight:700;padding:0;margin-bottom:6px}
+.q fieldset{border:none;padding:0;margin:0;display:grid;gap:6px}
+.q label{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:7px 12px;background:var(--bg);cursor:pointer}
+.q label.right{border-color:var(--ok);background:var(--soft-ok)}
+.q label.wrong{border-color:var(--bad);background:var(--soft-bad)}
+.q .expl{font-size:.88rem;color:var(--muted)}
+.score{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.score .big{font-family:var(--f-display);font-size:2.4rem;font-weight:800;font-variant-numeric:tabular-nums}
+
+/* À retenir */
+.recap{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.recap li{margin-bottom:4px}
+.recap ul{margin:0;padding-left:18px}
+footer{padding-block:40px 0;color:var(--muted);font-size:.85rem}
+
+@media (max-width:760px){
+  .diagram{grid-template-columns:1fr;grid-template-areas:"in" "a1" "uc" "a2" "out" "a3" "ms"}
+  .arrow{transform:rotate(90deg);padding-block:2px}
+  .a3{transform:none}
+  .uc{grid-template-columns:1fr}
+  .bus{writing-mode:horizontal-tb;background:repeating-linear-gradient(0deg,var(--copper) 0 2px,transparent 2px 6px);min-height:26px}
+  .bus span{padding:1px 4px}
+  .sim{grid-template-columns:1fr}
+  .bins{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .prog .bar{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}html{scroll-behavior:auto}}
+html{scroll-behavior:smooth}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="hero">
+    <p class="label">Tronc commun · Informatique · Chapitre 1</p>
+    <h1>L'ordinateur <em>de l'intérieur</em></h1>
+    <p class="lead">Un ordinateur reçoit des informations, les traite, les garde en mémoire et affiche des résultats. Dans ce cours, tu vas découvrir chaque partie qui rend cela possible, puis t'entraîner avec des activités corrigées automatiquement.</p>
+    <div class="meta">
+      <span>Durée : <b>2 h environ</b></span>
+      <span>Activités : <b>6</b></span>
+      <span>Objectif : <b>décrire la structure de base d'un ordinateur</b></span>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="Chapitres">
+    <div class="nav-in">
+      <div class="chips" id="chips"></div>
+      <div class="prog"><span class="bar"><b id="barFill"></b></span><span id="progTxt">0/6</span></div>
+    </div>
+  </nav>
+
+  <!-- 1 -->
+  <section id="s1" data-title="Définitions">
+    <div class="sec-head"><p class="label">Partie 1</p><h2>Informatique, information, ordinateur</h2></div>
+    <div class="prose">
+      <p>Avant d'ouvrir la machine, fixons le vocabulaire. Ces définitions reviennent dans tous les contrôles.</p>
+    </div>
+    <dl class="defs">
+      <div class="def"><dt>Information</dt><dd>Élément de connaissance (texte, nombre, image, son, vidéo) qui peut être codé, stocké, traité et transmis.</dd></div>
+      <div class="def"><dt>Informatique</dt><dd>Science du traitement automatique et rationnel de l'information à l'aide de machines : les ordinateurs. (INFORmation + autoMATIQUE)</dd></div>
+      <div class="def"><dt>Ordinateur</dt><dd>Machine électronique programmable qui reçoit des données, les traite selon des instructions (programmes) et produit des résultats.</dd></div>
+      <div class="def"><dt>Système informatique</dt><dd>Ensemble formé par le matériel et les logiciels qui travaillent ensemble pour traiter l'information.</dd></div>
+    </dl>
+    <div class="plate">
+      <p class="label">Le système informatique</p>
+      <div class="equation">
+        <span>Système informatique</span> = <span>Matériel<small>(hardware) : partie physique, on peut la toucher</small></span> + <span class="cu">Logiciel<small>(software) : programmes, on ne peut pas les toucher</small></span>
+      </div>
+      <p>Il existe deux familles de logiciels : les <b>logiciels de base</b> (le système d'exploitation, comme Windows, Linux, Android) qui font fonctionner la machine, et les <b>logiciels d'application</b> (traitement de texte, navigateur, jeux) qui servent à l'utilisateur.</p>
+    </div>
+    <div class="plate task">
+      <div class="task-title"><span class="label">Activité 1</span><h3>Matériel ou logiciel ?</h3></div>
+      <p>Pour chaque élément, choisis la bonne catégorie. La correction s'affiche tout de suite.</p>
+      <div class="sort-list" id="sortList"></div>
+      <p class="feedback" id="sortFb" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="s2" data-title="Schéma fonctionnel">
+    <div class="sec-head"><p class="label">Partie 2</p><h2>Le schéma fonctionnel d'un ordinateur</h2></div>
+    <div class="prose">
+      <p>Tout ordinateur, du téléphone au serveur, suit le même principe : <b>entrée → traitement → sortie</b>, avec une mémoire pour garder les données. Ce modèle s'appelle l'<b>architecture de Von Neumann</b> (1945).</p>
+      <p>Clique sur chaque bloc du schéma pour lire son rôle.</p>
+    </div>
+    <div class="plate">
+      <div class="diagram" id="diagram">
+        <button class="blk b-in" data-k="entree"><span class="hd">Unités d'entrée</span><span class="bd"><b>Entrée</b><span>clavier, souris, scanner…</span></span></button>
+        <div class="arrow a1" aria-hidden="true">→</div>
+        <div class="uc">
+          <span class="label">Unité centrale</span>
+          <div class="col">
+            <span class="label">Processeur (CPU)</span>
+            <button class="blk" data-k="ucmd"><span class="hd">UC</span><span class="bd"><b>Unité de commande</b><span>dirige et coordonne</span></span></button>
+            <button class="blk" data-k="ual"><span class="hd">UAL</span><span class="bd"><b>Unité arithmétique et logique</b><span>calcule et compare</span></span></button>
+          </div>
+          <button class="bus" data-k="bus" aria-label="Bus"><span>Bus</span></button>
+          <div class="col">
+            <span class="label">Mémoire centrale</span>
+            <button class="blk" data-k="ram"><span class="hd">RAM</span><span class="bd"><b>Mémoire vive</b><span>données en cours</span></span></button>
+            <button class="blk" data-k="rom"><span class="hd">ROM</span><span class="bd"><b>Mémoire morte</b><span>programme de démarrage</span></span></button>
+          </div>
+        </div>
+        <div class="arrow a2" aria-hidden="true">→</div>
+        <button class="blk b-out" data-k="sortie"><span class="hd">Unités de sortie</span><span class="bd"><b>Sortie</b><span>écran, imprimante…</span></span></button>
+        <div class="arrow a3" aria-hidden="true">⇅</div>
+        <button class="blk b-ms" data-k="masse"><span class="hd">Mémoires de masse</span><span class="bd"><b>Stockage</b><span>disque dur, SSD, clé USB</span></span></button>
+      </div>
+      <div class="info" id="info" aria-live="polite">
+        <h3>Choisis un bloc</h3>
+        <p>Chaque bloc correspond à une fonction de l'ordinateur. Le cadre vert regroupe l'unité centrale : processeur + mémoire centrale.</p>
+      </div>
+    </div>
+
+    <div class="plate task">
+      <div class="task-title"><span class="label">Activité 2</span><h3>Suis le trajet d'un calcul</h3></div>
+      <p>Un élève tape <b>7 + 5</b> puis appuie sur Entrée. Avance étape par étape et regarde quel bloc travaille dans le schéma ci-dessus.</p>
+      <div class="sim">
+        <div style="display:grid;gap:12px;min-width:0">
+          <div class="steps-dots" id="dots"></div>
+          <p class="sim-text" id="simText" aria-live="polite">Clique sur « Étape suivante » pour commencer.</p>
+          <div class="sim-ctrl">
+            <button class="btn ghost" id="simPrev">Précédente</button>
+            <button class="btn" id="simNext">Étape suivante</button>
+            <button class="btn ghost" id="simReset">Recommencer</button>
+          </div>
+        </div>
+        <div class="screen" aria-label="Écran simulé"><span class="lbl">Écran</span><span id="scr">_</span><span id="scrBin" class="lbl"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="s3" data-title="Unité centrale">
+    <div class="sec-head"><p class="label">Partie 3</p><h2>L'unité centrale : processeur et mémoire centrale</h2></div>
+    <div class="prose">
+      <p>Attention à ne pas confondre : dans la vie courante, on appelle « unité centrale » la tour (le boîtier). En cours d'informatique, l'<b>unité centrale</b> désigne le <b>processeur + la mémoire centrale</b>. Tous ces composants sont fixés sur la <b>carte mère</b>, qui les relie grâce aux <b>bus</b>.</p>
+    </div>
+    <div class="cpu-parts">
+      <div class="plate">
+        <p class="label">Le processeur (CPU / microprocesseur)</p>
+        <p>C'est le « cerveau » : il exécute les instructions des programmes. Sa vitesse est sa <b>fréquence</b>, mesurée en <b>gigahertz (GHz)</b>. Exemple : 3,2 GHz = 3,2 milliards de cycles par seconde.</p>
+        <ul style="margin:0;padding-left:20px">
+          <li><b>Unité de commande (UC)</b> : va chercher les instructions en mémoire, les décode et donne les ordres aux autres composants.</li>
+          <li><b>Unité arithmétique et logique (UAL)</b> : réalise les calculs (+, −, ×, ÷) et les comparaisons (=, &lt;, &gt;, ET, OU).</li>
+          <li><b>Registres</b> : petites mémoires très rapides à l'intérieur du processeur.</li>
+        </ul>
+      </div>
+      <div class="plate">
+        <p class="label">La carte mère et les bus</p>
+        <p>La <b>carte mère</b> est le grand circuit imprimé sur lequel on branche le processeur, les barrettes de RAM, la ROM (BIOS), les cartes d'extension et les connecteurs (USB, HDMI, réseau…).</p>
+        <p>Les <b>bus</b> sont les « routes » électriques qui transportent les informations entre les composants : bus de données, bus d'adresses et bus de commande.</p>
+      </div>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Mémoire</th><th>Rôle</th><th>Lecture / écriture</th><th>Si on coupe le courant</th><th>Exemple</th></tr></thead>
+        <tbody>
+          <tr><td>RAM (mémoire vive)</td><td>Garde les programmes et données en cours d'utilisation</td><td>Lecture et écriture</td><td>Contenu perdu (volatile)</td><td>Barrette de 8 Go</td></tr>
+          <tr><td>ROM (mémoire morte)</td><td>Contient le programme de démarrage (BIOS / UEFI)</td><td>Lecture seule</td><td>Contenu conservé</td><td>Puce BIOS de la carte mère</td></tr>
+          <tr><td>Mémoire de masse</td><td>Stocke les fichiers et logiciels à long terme</td><td>Lecture et écriture</td><td>Contenu conservé</td><td>Disque dur 1 To, SSD, clé USB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="plate task">
+      <div class="task-title"><span class="label">Activité 3</span><h3>Vrai ou faux ?</h3></div>
+      <div class="tf" id="tf"></div>
+      <p class="feedback" id="tfFb" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section id="s4" data-title="Périphériques">
+    <div class="sec-head"><p class="label">Partie 4</p><h2>Les périphériques</h2></div>
+    <div class="prose">
+      <p>Un <b>périphérique</b> est un appareil branché à l'unité centrale. On les classe selon le sens de circulation de l'information :</p>
+    </div>
+    <div class="defs">
+      <div class="def" style="border-color:var(--c-in)"><dt>Entrée</dt><dd>L'information va de l'utilisateur vers l'ordinateur. Clavier, souris, scanner, microphone, webcam.</dd></div>
+      <div class="def" style="border-color:var(--c-out)"><dt>Sortie</dt><dd>L'information va de l'ordinateur vers l'utilisateur. Écran, imprimante, haut-parleurs, vidéoprojecteur.</dd></div>
+      <div class="def" style="border-color:var(--c-io)"><dt>Entrée / sortie</dt><dd>L'information circule dans les deux sens. Écran tactile, modem, imprimante multifonction, casque-micro.</dd></div>
+      <div class="def" style="border-color:var(--c-store)"><dt>Stockage</dt><dd>Mémoires de masse qui conservent les données : disque dur, SSD, clé USB, carte SD, DVD.</dd></div>
+    </div>
+    <div class="plate task">
+      <div class="task-title"><span class="label">Activité 4</span><h3>Range chaque périphérique</h3></div>
+      <p>Touche un périphérique, puis touche la bonne catégorie. S'il est bien placé, il reste dans la case.</p>
+      <div class="pool" id="pool"></div>
+      <div class="bins" id="bins">
+        <button class="bin e" data-c="e"><span class="hd">Entrée</span><span class="hint">vers l'ordinateur</span><span class="got"></span></button>
+        <button class="bin s" data-c="s"><span class="hd">Sortie</span><span class="hint">vers l'utilisateur</span><span class="got"></span></button>
+        <button class="bin es" data-c="es"><span class="hd">Entrée / sortie</span><span class="hint">dans les deux sens</span><span class="got"></span></button>
+        <button class="bin m" data-c="m"><span class="hd">Stockage</span><span class="hint">mémoire de masse</span><span class="got"></span></button>
+      </div>
+      <p class="feedback" id="devFb" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section id="s5" data-title="Unités de mesure">
+    <div class="sec-head"><p class="label">Partie 5</p><h2>Mesurer la mémoire : bits et octets</h2></div>
+    <div class="prose">
+      <p>L'ordinateur ne comprend que deux états électriques : le courant passe (1) ou ne passe pas (0). Ce chiffre 0 ou 1 s'appelle un <b>bit</b> (binary digit). Un groupe de <b>8 bits</b> forme un <b>octet</b>, qui suffit pour coder un caractère, par exemple la lettre A = 01000001.</p>
+      <p>Pour les grandes quantités, on multiplie par <b>1024</b> (2<sup>10</sup>) à chaque étape :</p>
+    </div>
+    <div class="units">
+      <span>1 octet = 8 bits</span><i>×1024 →</i><span>1 Ko</span><i>×1024 →</i><span>1 Mo</span><i>×1024 →</i><span>1 Go</span><i>×1024 →</i><span>1 To</span>
+    </div>
+    <div class="plate">
+      <p class="label">Convertisseur</p>
+      <div class="conv">
+        <label for="cv">Quantité<input id="cv" type="number" min="0" step="any" value="2"></label>
+        <label for="cu">Unité<select id="cu">
+          <option value="bit">bit</option><option value="o">octet (o)</option><option value="Ko">Ko</option><option value="Mo">Mo</option><option value="Go" selected>Go</option><option value="To">To</option>
+        </select></label>
+      </div>
+      <div class="conv-out" id="convOut"></div>
+      <p style="font-size:.85rem;color:var(--muted)">Remarque : les fabricants de disques utilisent souvent 1000 au lieu de 1024. C'est pour cela qu'un disque « 500 Go » affiche environ 465 Go dans l'ordinateur.</p>
+    </div>
+    <div class="plate task">
+      <div class="task-title"><span class="label">Activité 5</span><h3>Exercices de conversion</h3></div>
+      <p>Écris la réponse puis clique sur « Vérifier ». Utilise 1024 pour passer d'une unité à la suivante.</p>
+      <div class="ex" id="ex"></div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section id="s6" data-title="Quiz final">
+    <div class="sec-head"><p class="label">Partie 6</p><h2>Quiz final</h2></div>
+    <div class="prose"><p>Dix questions pour vérifier que tu as tout compris. Réponds à toutes, puis clique sur « Corriger ».</p></div>
+    <form class="plate" id="quiz"></form>
+  </section>
+
+  <section id="recap" data-title="À retenir">
+    <div class="sec-head"><p class="label">Synthèse</p><h2>À retenir</h2></div>
+    <div class="recap">
+      <div class="plate"><p class="label">Structure</p><ul>
+        <li>Système informatique = matériel + logiciel.</li>
+        <li>Schéma : entrée → unité centrale → sortie, avec les mémoires de masse.</li>
+        <li>Unité centrale = processeur + mémoire centrale.</li></ul></div>
+      <div class="plate"><p class="label">Composants</p><ul>
+        <li>Processeur = UC (commande) + UAL (calculs) ; fréquence en GHz.</li>
+        <li>RAM : lecture/écriture, volatile. ROM : lecture seule, contient le BIOS.</li>
+        <li>La carte mère relie tout grâce aux bus.</li></ul></div>
+      <div class="plate"><p class="label">Mesures et périphériques</p><ul>
+        <li>1 octet = 8 bits ; 1 Ko = 1024 o ; 1 Mo = 1024 Ko ; 1 Go = 1024 Mo.</li>
+        <li>Périphériques d'entrée, de sortie, d'entrée/sortie et de stockage.</li></ul></div>
+    </div>
+    <div><button class="btn ghost" id="resetAll">Effacer ma progression</button> <span id="resetMsg" style="font-size:.85rem;color:var(--muted)"></span></div>
+  </section>
+
+  <footer>Cours interactif · Tronc commun · Structure de base d'un ordinateur</footer>
+</div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+  const KEY='cours-ordi-progress-v1';
+  let done={};
+  try{done=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){done={}}
+  const SECS=['s1','s2','s3','s4','s5','s6'];
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(done))}catch(e){}}
+  function markDone(id){if(!done[id]){done[id]=true;save()}renderNav()}
+  function renderNav(){
+    const c=$('#chips');c.innerHTML='';
+    SECS.concat(['recap']).forEach((id,i)=>{
+      const sec=document.getElementById(id);
+      const a=document.createElement('a');a.href='#'+id;a.className='chip'+(done[id]?' done':'');
+      a.innerHTML='<i>'+(done[id]?'✓':(id==='recap'?'★':i+1))+'</i>'+sec.dataset.title;
+      c.appendChild(a);
+    });
+    const n=SECS.filter(s=>done[s]).length;
+    $('#barFill').style.width=(n/SECS.length*100)+'%';
+    $('#progTxt').textContent=n+'/'+SECS.length+' activités';
+  }
+  const shuffle=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+
+  /* Activité 1 : matériel / logiciel */
+  const SORT=[['Clavier','M'],['Windows','L'],['Processeur','M'],['Microsoft Word','L'],['Navigateur Chrome','L'],['Carte mère','M'],['Linux','L'],['Barrette de RAM','M'],['Antivirus','L'],['Imprimante','M'],['Android','L'],['Disque dur','M']];
+  const sortState={};
+  shuffle(SORT).forEach(([nm,ans])=>{
+    const row=document.createElement('div');row.className='sort-row';
+    row.innerHTML='<span class="nm">'+nm+'</span><span class="opts"><button aria-pressed="false" data-v="M">Matériel</button><button aria-pressed="false" data-v="L">Logiciel</button></span>';
+    row.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      row.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+      const ok=b.dataset.v===ans;row.className='sort-row '+(ok?'ok':'bad');sortState[nm]=ok;
+      const answered=Object.keys(sortState).length, good=Object.values(sortState).filter(Boolean).length;
+      const fb=$('#sortFb');
+      if(good===SORT.length){fb.className='feedback ok';fb.textContent='Bravo, tout est juste ! Le matériel se touche, le logiciel non.';markDone('s1')}
+      else{fb.className='feedback'+(ok?' ok':' bad');fb.textContent=(ok?'Correct. ':'Pas tout à fait : '+nm+(ans==='M'?' est un élément physique.':' est un programme.')+' ')+good+'/'+SORT.length+' bonnes réponses.'}
+    }));
+    $('#sortList').appendChild(row);
+  });
+
+  /* Partie 2 : schéma */
+  const INFO={
+    entree:['Unités d\'entrée','Elles permettent de faire entrer des informations dans l\'ordinateur et de les transformer en code binaire (0 et 1).',['Clavier, souris','Scanner, webcam','Microphone, lecteur de code-barres']],
+    ucmd:['Unité de commande (UC)','Le chef d\'orchestre du processeur. Elle va chercher chaque instruction dans la mémoire centrale, la décode, puis envoie les ordres aux autres composants.',['Lit l\'instruction suivante','La décode (que faut-il faire ?)','Commande l\'UAL, la mémoire et les périphériques']],
+    ual:['Unité arithmétique et logique (UAL)','Elle effectue tous les traitements demandés par l\'unité de commande.',['Opérations arithmétiques : + − × ÷','Opérations logiques : ET, OU, NON','Comparaisons : =, <, >']],
+    ram:['Mémoire vive (RAM)','Random Access Memory. Elle contient les programmes ouverts et les données en cours de traitement. Le processeur y lit et y écrit en permanence.',['Lecture et écriture','Volatile : tout est effacé à l\'arrêt','Capacité courante : 4 à 32 Go']],
+    rom:['Mémoire morte (ROM)','Read Only Memory. Elle contient le BIOS (ou UEFI), le petit programme qui démarre l\'ordinateur et vérifie le matériel.',['Lecture seule','Non volatile : conservée sans courant','Écrite par le fabricant']],
+    bus:['Les bus','Ensemble de fils conducteurs qui transportent les informations entre le processeur, la mémoire et les périphériques.',['Bus de données : transporte les données','Bus d\'adresses : indique où lire ou écrire','Bus de commande : transporte les ordres']],
+    sortie:['Unités de sortie','Elles transforment les résultats binaires en informations compréhensibles par l\'utilisateur.',['Écran, vidéoprojecteur','Imprimante','Haut-parleurs, casque']],
+    masse:['Mémoires de masse (auxiliaires)','Elles conservent les données et les logiciels de façon permanente, même ordinateur éteint. Elles sont plus lentes que la RAM mais beaucoup plus grandes.',['Disque dur (HDD), SSD','Clé USB, carte SD','CD, DVD']]
+  };
+  const blocks=$$('#diagram [data-k]');
+  function showInfo(k){
+    const [t,d,l]=INFO[k];
+    blocks.forEach(b=>b.classList.toggle('sel',b.dataset.k===k));
+    $('#info').innerHTML='<h3>'+t+'</h3><p>'+d+'</p><ul>'+l.map(x=>'<li>'+x+'</li>').join('')+'</ul>';
+  }
+  blocks.forEach(b=>b.addEventListener('click',()=>showInfo(b.dataset.k)));
+
+  const STEPS=[
+    {k:['entree'],t:'1. Entrée — L\'élève tape 7 + 5 au clavier. Le clavier transforme chaque touche en code binaire : « 7 » devient 00110111.',s:'7 + 5',bin:'7 → 00110111'},
+    {k:['bus','ram'],t:'2. Mémorisation — Les codes circulent sur le bus et sont rangés dans la mémoire vive (RAM).',s:'7 + 5',bin:'RAM ← 7, 5'},
+    {k:['ucmd'],t:'3. Commande — L\'unité de commande lit l\'instruction « additionner » dans la RAM, la décode et donne l\'ordre de calculer.',s:'7 + 5',bin:'instruction : ADD'},
+    {k:['ual'],t:'4. Traitement — L\'UAL fait le calcul en binaire : 0111 + 0101 = 1100, c\'est-à-dire 12.',s:'7 + 5',bin:'0111 + 0101 = 1100'},
+    {k:['bus','ram'],t:'5. Résultat — Le résultat 12 est rangé à son tour dans la RAM.',s:'7 + 5',bin:'RAM ← 12'},
+    {k:['sortie'],t:'6. Sortie — Le résultat est envoyé à l\'écran, qui le transforme en chiffres lisibles.',s:'7 + 5 = 12',bin:''},
+    {k:['masse'],t:'7. Stockage — Si l\'élève enregistre son travail, il est copié sur le disque dur (mémoire de masse) et sera conservé après l\'arrêt. La RAM, elle, sera vidée.',s:'7 + 5 = 12',bin:'calcul.txt enregistré'}
+  ];
+  let step=-1;
+  const dots=$('#dots');STEPS.forEach(()=>dots.appendChild(document.createElement('i')));
+  function renderSim(){
+    blocks.forEach(b=>b.classList.remove('lit'));
+    [...dots.children].forEach((d,i)=>d.classList.toggle('on',i<=step));
+    if(step<0){$('#simText').textContent='Clique sur « Étape suivante » pour commencer.';$('#scr').textContent='_';$('#scrBin').textContent=''}
+    else{const s=STEPS[step];s.k.forEach(k=>blocks.filter(b=>b.dataset.k===k).forEach(b=>b.classList.add('lit')));
+      $('#simText').textContent=s.t;$('#scr').textContent=step<5?'_':s.s;$('#scrBin').textContent=s.bin;showInfo(s.k[s.k.length-1]);}
+    $('#simPrev').disabled=step<0;$('#simNext').disabled=step>=STEPS.length-1;
+    if(step===STEPS.length-1)markDone('s2');
+  }
+  $('#simNext').addEventListener('click',()=>{step=Math.min(step+1,STEPS.length-1);renderSim()});
+  $('#simPrev').addEventListener('click',()=>{step=Math.max(step-1,-1);renderSim()});
+  $('#simReset').addEventListener('click',()=>{step=-1;renderSim()});
+  renderSim();
+
+  /* Activité 3 : vrai / faux */
+  const TF=[
+    ['La RAM perd son contenu quand on éteint l\'ordinateur.',true,'Vrai : la RAM est une mémoire volatile.'],
+    ['On peut écrire facilement des fichiers dans la ROM.',false,'Faux : la ROM est en lecture seule, elle est écrite par le fabricant.'],
+    ['L\'UAL est la partie du processeur qui effectue les calculs.',true,'Vrai : Unité Arithmétique et Logique.'],
+    ['L\'unité centrale est composée du processeur et de l\'écran.',false,'Faux : unité centrale = processeur + mémoire centrale. L\'écran est un périphérique.'],
+    ['Un processeur à 3 GHz est en général plus rapide qu\'un processeur à 1,5 GHz de même génération.',true,'Vrai : la fréquence indique le nombre de cycles par seconde.'],
+    ['La carte mère sert à stocker les photos de l\'utilisateur.',false,'Faux : la carte mère relie les composants. Les photos sont sur une mémoire de masse.']
+  ];
+  const tfState={};
+  TF.forEach(([q,a,why],i)=>{
+    const r=document.createElement('div');r.className='tf-row';
+    r.innerHTML='<p>'+q+'</p><span class="opts"><button data-v="1">Vrai</button><button data-v="0">Faux</button></span><span class="why" hidden></span>';
+    r.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      const ok=(b.dataset.v==='1')===a;tfState[i]=ok;r.className='tf-row '+(ok?'ok':'bad');
+      const w=r.querySelector('.why');w.hidden=false;w.textContent=why;
+      const good=Object.values(tfState).filter(Boolean).length,fb=$('#tfFb');
+      if(good===TF.length){fb.className='feedback ok';fb.textContent='Parfait : 6/6.';markDone('s3')}
+      else{fb.className='feedback';fb.textContent=good+'/'+TF.length+' bonnes réponses. Corrige les lignes en rouge.'}
+    }));
+    $('#tf').appendChild(r);
+  });
+
+  /* Activité 4 : périphériques */
+  const DEV=[['Clavier','e'],['Souris','e'],['Scanner','e'],['Microphone','e'],['Webcam','e'],['Écran','s'],['Imprimante','s'],['Haut-parleurs','s'],['Vidéoprojecteur','s'],['Écran tactile','es'],['Modem','es'],['Casque-micro','es'],['Disque dur','m'],['Clé USB','m'],['SSD','m'],['Carte SD','m']];
+  const NAMES={e:'entrée',s:'sortie',es:'entrée / sortie',m:'stockage'};
+  const HINT={'Écran tactile':'on touche l\'écran (entrée) et il affiche (sortie).','Modem':'il envoie et reçoit des données.','Casque-micro':'le micro capte, le casque diffuse.','Imprimante':'elle produit un résultat sur papier.','Scanner':'il fait entrer une image dans l\'ordinateur.','Webcam':'elle capte une image.','Microphone':'il capte un son.','Vidéoprojecteur':'il affiche l\'image de l\'ordinateur.'};
+  let picked=null, placed=0;
+  shuffle(DEV).forEach(([nm,c])=>{
+    const b=document.createElement('button');b.className='dev';b.textContent=nm;b.dataset.c=c;b.setAttribute('aria-pressed','false');
+    b.addEventListener('click',()=>{if(b.classList.contains('ok'))return;
+      $$('.dev').forEach(x=>x.setAttribute('aria-pressed','false'));
+      if(picked===b){picked=null;$$('.bin').forEach(x=>x.classList.remove('armed'));return}
+      picked=b;b.setAttribute('aria-pressed','true');$$('.bin').forEach(x=>x.classList.add('armed'));
+      $('#devFb').className='feedback';$('#devFb').textContent='« '+nm+' » sélectionné. Choisis maintenant sa catégorie.'});
+    $('#pool').appendChild(b);
+  });
+  $$('.bin').forEach(bin=>bin.addEventListener('click',()=>{
+    const fb=$('#devFb');
+    if(!picked){fb.className='feedback';fb.textContent='Touche d\'abord un périphérique.';return}
+    const nm=picked.textContent,c=picked.dataset.c;
+    if(bin.dataset.c===c){
+      const s=document.createElement('span');s.textContent=nm;bin.querySelector('.got').appendChild(s);
+      picked.remove();placed++;fb.className='feedback ok';fb.textContent='Correct : '+nm+' est un périphérique de '+NAMES[c]+'.'+(HINT[nm]?' En effet, '+HINT[nm]:'');
+      if(placed===DEV.length){fb.textContent='Bravo, les '+DEV.length+' périphériques sont bien rangés !';markDone('s4')}
+    }else{
+      bin.classList.remove('shake');void bin.offsetWidth;bin.classList.add('shake');
+      picked.setAttribute('aria-pressed','false');
+      fb.className='feedback bad';fb.textContent='Non, '+nm+' n\'est pas un périphérique de '+NAMES[bin.dataset.c]+'. Réfléchis au sens de l\'information et réessaie.';
+    }
+    picked=null;$$('.bin').forEach(x=>x.classList.remove('armed'));
+  }));
+
+  /* Partie 5 : convertisseur */
+  const U=['bit','o','Ko','Mo','Go','To'];
+  const toBits=(v,u)=>u==='bit'?v:v*8*Math.pow(1024,U.indexOf(u)-1);
+  const fmt=n=>{if(n===0)return'0';if(n>=1e15||n<1e-6)return n.toExponential(3).replace('.',',');return(Math.round(n*1e6)/1e6).toLocaleString('fr-FR',{maximumFractionDigits:6})};
+  function conv(){
+    const v=parseFloat($('#cv').value),u=$('#cu').value,out=$('#convOut');out.innerHTML='';
+    if(isNaN(v)||v<0){out.innerHTML='<div><small>Entre un nombre positif.</small></div>';return}
+    const bits=toBits(v,u);
+    U.forEach(x=>{const val=x==='bit'?bits:bits/8/Math.pow(1024,U.indexOf(x)-1);
+      const d=document.createElement('div');d.innerHTML='<small>'+(x==='o'?'octets':x)+'</small><b>'+fmt(val)+'</b>';out.appendChild(d)});
+  }
+  $('#cv').addEventListener('input',conv);$('#cu').addEventListener('change',conv);conv();
+
+  const EX=[
+    ['Combien de bits y a-t-il dans 4 octets ?',32,'bits','4 × 8 = 32 bits.'],
+    ['Combien de Ko y a-t-il dans 3 Mo ?',3072,'Ko','3 × 1024 = 3072 Ko.'],
+    ['Combien de Mo y a-t-il dans 2 Go ?',2048,'Mo','2 × 1024 = 2048 Mo.'],
+    ['Un fichier fait 5120 Ko. Combien de Mo cela fait-il ?',5,'Mo','5120 ÷ 1024 = 5 Mo.'],
+    ['Une clé USB de 8 Go contient des chansons de 4 Mo chacune. Combien de chansons au maximum ?',2048,'chansons','8 Go = 8 × 1024 = 8192 Mo, et 8192 ÷ 4 = 2048 chansons.']
+  ];
+  const exState={};
+  EX.forEach(([q,a,u,why],i)=>{
+    const r=document.createElement('div');r.className='ex-row';
+    r.innerHTML='<p>'+q+'</p><input type="number" step="any" id="ex'+i+'" aria-label="Réponse"> <span>'+u+'</span><button class="btn">Vérifier</button><span class="fb" aria-live="polite"></span>';
+    const inp=r.querySelector('input'),fb=r.querySelector('.fb');
+    const check=()=>{const v=parseFloat(String(inp.value).replace(',','.'));if(isNaN(v)){fb.textContent='Écris un nombre.';r.className='ex-row';return}
+      const ok=Math.abs(v-a)<1e-9;exState[i]=ok;r.className='ex-row '+(ok?'ok':'bad');fb.textContent=ok?'Juste ! '+why:'Pas encore. Indice : multiplie ou divise par 1024 (ou par 8 pour les bits).';
+      if(EX.every((_,j)=>exState[j]))markDone('s5')};
+    r.querySelector('button').addEventListener('click',check);
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')check()});
+    $('#ex').appendChild(r);
+  });
+
+  /* Activité 6 : quiz */
+  const QZ=[
+    ['Quel composant est considéré comme le « cerveau » de l\'ordinateur ?',['La mémoire vive','Le processeur','Le disque dur','La carte mère'],1,'Le processeur exécute toutes les instructions.'],
+    ['L\'unité centrale est formée de :',['Le processeur et la mémoire centrale','L\'écran et le clavier','Le disque dur et la clé USB','La souris et l\'imprimante'],0,'Unité centrale = processeur + mémoire centrale (RAM et ROM).'],
+    ['Quelle mémoire est volatile ?',['La ROM','Le disque dur','La RAM','Le DVD'],2,'La RAM perd son contenu quand le courant est coupé.'],
+    ['Que contient la ROM ?',['Les photos de l\'utilisateur','Le programme de démarrage (BIOS)','Les programmes ouverts','Les pages web visitées'],1,'La ROM contient le BIOS/UEFI qui démarre l\'ordinateur.'],
+    ['Que signifie UAL ?',['Unité d\'Accès Logique','Unité Arithmétique et Logique','Unité Automatique de Lecture','Unité d\'Affichage Local'],1,'L\'UAL fait les calculs et les comparaisons.'],
+    ['Quel est le rôle de l\'unité de commande ?',['Afficher les résultats','Stocker les fichiers','Lire, décoder les instructions et coordonner','Relier l\'ordinateur à Internet'],2,'L\'unité de commande dirige le fonctionnement du processeur.'],
+    ['Le scanner est un périphérique :',['D\'entrée','De sortie','De stockage','D\'entrée / sortie'],0,'Il fait entrer une image dans l\'ordinateur.'],
+    ['1 octet est égal à :',['2 bits','8 bits','10 bits','1024 bits'],1,'1 octet = 8 bits.'],
+    ['1 Go est égal à :',['1000 Ko','1024 Ko','1024 Mo','8 Mo'],2,'1 Go = 1024 Mo.'],
+    ['Quel élément relie tous les composants de l\'ordinateur ?',['L\'alimentation','Le boîtier','La carte mère','Le ventilateur'],2,'La carte mère porte les composants et les relie par les bus.']
+  ];
+  const form=$('#quiz');
+  QZ.forEach(([q,opts,a,ex],i)=>{
+    const d=document.createElement('div');d.className='q';
+    d.innerHTML='<fieldset><legend>'+(i+1)+'. '+q+'</legend>'+opts.map((o,j)=>'<label><input type="radio" name="q'+i+'" id="q'+i+'_'+j+'" value="'+j+'"> '+o+'</label>').join('')+'</fieldset><p class="expl" hidden>'+ex+'</p>';
+    form.appendChild(d);
+  });
+  const sc=document.createElement('div');sc.className='score';
+  sc.innerHTML='<button class="btn" type="submit">Corriger</button><button class="btn ghost" type="button" id="qReset">Recommencer</button><span class="big" id="qScore" aria-live="polite"></span><span id="qMsg"></span>';
+  form.appendChild(sc);
+  form.addEventListener('submit',e=>{e.preventDefault();
+    let score=0,missing=0;
+    QZ.forEach(([,,a],i)=>{const sel=form.querySelector('input[name="q'+i+'"]:checked');if(!sel)missing++});
+    if(missing){$('#qScore').textContent='';$('#qMsg').textContent='Il reste '+missing+' question'+(missing>1?'s':'')+' sans réponse.';return}
+    QZ.forEach(([,,a],i)=>{
+      const sel=form.querySelector('input[name="q'+i+'"]:checked');
+      form.querySelectorAll('input[name="q'+i+'"]').forEach(inp=>{const l=inp.parentElement;l.classList.remove('right','wrong');
+        if(+inp.value===a)l.classList.add('right');else if(inp===sel)l.classList.add('wrong')});
+      if(+sel.value===a)score++;
+      form.querySelectorAll('.expl')[i].hidden=false;
+    });
+    $('#qScore').textContent=score+'/10';
+    $('#qMsg').textContent=score>=9?'Excellent travail !':score>=7?'Bien, relis les explications des erreurs.':score>=5?'C\'est un début : revois les parties 2 et 3.':'Relis le cours puis recommence le quiz.';
+    markDone('s6');
+  });
+  $('#qReset').addEventListener('click',()=>{form.reset();form.querySelectorAll('label').forEach(l=>l.classList.remove('right','wrong'));form.querySelectorAll('.expl').forEach(p=>p.hidden=true);$('#qScore').textContent='';$('#qMsg').textContent=''});
+
+  $('#resetAll').addEventListener('click',()=>{done={};save();renderNav();$('#resetMsg').textContent='Progression effacée. Recharge la page pour refaire les activités.'});
+  renderNav();
+})();
+</script>
+</body>
+</html>
