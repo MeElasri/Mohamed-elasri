@@ -27,7 +27,7 @@ Run it as a notebook (Kaggle / Jupyter) or cell by cell in VS Code / Spyder."""
 # The dataset layout, 286->256 random crops, direction `b2a`, the PatchGAN discriminator and the loss definitions are the same as in WavTRGAN. Other corruptions (free-form strokes, boxes, a center square or mask files, filled with white, a random color, noise or a patch of another image) can be generated with `make_corrupted_dataset.py`; its `mask` folder gives the exact corrupted region of every image.
 
 # %%
-# %pip install -q pytorch_wavelets PyWavelets torch-fidelity lpips   (notebook only; in a terminal: pip install pytorch_wavelets PyWavelets torch-fidelity)
+# %pip install -q pytorch_wavelets PyWavelets torch-fidelity lpips einops   (notebook only; in a terminal: pip install pytorch_wavelets PyWavelets torch-fidelity)
 
 # %% [markdown]
 # # Configuration
@@ -53,10 +53,10 @@ opt = SimpleNamespace(
     threads=4,
     seed=123,
 
-    # optimisation (WavTRGAN schedule: constant lr for niter epochs, then linear decay over niter_decay epochs)
+    # optimisation: constant lr for niter epochs, then linear decay over niter_decay epochs (WavTRGAN: 100 + 50)
     epoch_count=1,
-    niter=100,
-    niter_decay=50,
+    niter=50,
+    niter_decay=30,
     max_epochs_per_run=0,       # > 0: stop after this many epochs (Kaggle sessions end after 12 h; continue with opt.resume)
     lr_policy="lambda",
     lr_decay_iters=50,
@@ -107,7 +107,32 @@ opt = SimpleNamespace(
     sample_dir="samples",
     log_every=50,
     max_iters_per_epoch=0,      # > 0 ends every epoch early (quick tests)
+
+    # ablation study: one switch per run (see ABLATIONS below), "" = normal training
+    ablation="",
+    ablation_epochs=20,         # short schedule of every ablation run (3/4 constant lr, 1/4 decay) ...
+    ablation_iters_per_epoch=1750,   # ... of this many iterations each (1750 x 20 = 5 epochs of 28k images at batch 4)
 )
+
+# Ablation runs change one setting of the full model, all with the same short schedule, and keep their checkpoints
+# and samples in their own folders. "full" is the reference: compare every variant with it, not with the main run.
+# Use the same opt.init_from_gan for all of them.
+ABLATIONS = {
+    "full": {},
+    "pure_fm": dict(lambda_l1=0.0, lambda_per=0.0, lambda_style=0.0, lambda_gan=0.0, mask_head=False, composite=False),
+    "no_mask_head": dict(mask_head=False, composite=False),
+    "no_wavelet": dict(use_wavelet=False),
+    "v_pred": dict(pred="v"),
+    "no_time_weight": dict(aux_weighting="none"),
+    "no_full_res_skip": dict(full_res_skip=False),
+}
+if opt.ablation:
+    for key, value in ABLATIONS[opt.ablation].items():
+        setattr(opt, key, value)
+    opt.niter = opt.ablation_epochs - opt.ablation_epochs // 4
+    opt.niter_decay = opt.ablation_epochs // 4
+    opt.max_iters_per_epoch = opt.ablation_iters_per_epoch
+    opt.checkpoint_dir, opt.sample_dir = "checkpoint_" + opt.ablation, "samples_" + opt.ablation
 
 random.seed(opt.seed)
 np.random.seed(opt.seed)
@@ -1063,6 +1088,8 @@ def warm_start_from_gan(net, path):
 #
 # Checkpoints: `checkpoint/flow_latest.pth` (everything needed to resume, overwritten every epoch) and `checkpoint/flow_ema_epoch_N.pth` (EMA generator, for evaluation). On Kaggle, set `opt.max_epochs_per_run` so that a run finishes within the 12-hour limit, then continue in a new session with `opt.resume`.
 #
+# **Ablation runs:** set `opt.ablation` in the configuration to one of the keys of `ABLATIONS` and train as usual; each run uses the short schedule `opt.ablation_epochs` x `opt.ablation_iters_per_epoch` and its own `checkpoint_<name>` and `samples_<name>` folders, and is continued with `opt.resume = "checkpoint_<name>/flow_latest.pth"`. Train `"full"` (the reference) first, then `"pure_fm"`, `"no_mask_head"` and `"no_wavelet"`; `"v_pred"`, `"no_time_weight"` and `"no_full_res_skip"` if time allows. Rows (d) and (e) of the ablation table come from the `"full"` run, evaluated with `opt.composite = False` and with `opt.composite_threshold = 0.5`.
+#
 # To add the mask head to a run trained without it, warm-start instead of resuming: `opt.init_from_gan = ".../checkpoint/flow_latest.pth"`, `opt.resume = ""`, and `opt.epoch_count` = the next epoch (e.g. 8) to keep the epoch numbering and the learning-rate schedule. The image generator (the EMA weights of that run) and the discriminator continue from the checkpoint; the mask head and the optimizer states start fresh. Before training, `samples/true_masks.jpg` shows the training target of the mask head for the preview images: it should cover the corrupted strokes.
 #
 # Checkpoints saved before the discriminator fix can be resumed as usual: their discriminator, which had not learned to separate real and generated images, is replaced by a new one (see the losses cell), and everything else continues. With a working discriminator the D loss (`Loss_D`) stays below 0.5.
@@ -1454,3 +1481,825 @@ plt.show()
 # # Precision-recall curves
 #
 # The PR-curve script of the old notebook works unchanged on these outputs: set `GT_FOLDER = REAL_DIR`, `GENERATED_FOLDER = FAKE_DIR` and add `'WavTR-Flow (Ours)': FAKE_DIR` to `METHODS`.
+
+# %% [markdown]
+# # Score checkpoints and samplers
+#
+# Scores saved EMA checkpoints on the first `SCORE_IMAGES` test images, with the seeded noise of the evaluation cell, so that all rows are computed on the same images and can be compared with each other. Two uses:
+# - **Training curve:** `SCORE_CHECKPOINTS = [f"{opt.checkpoint_dir}/flow_ema_epoch_{e}.pth" for e in range(40, 81, 5)]` with 500 images. Use it to follow training, not to pick the epoch you report: report the last checkpoint.
+# - **Sampler table:** one checkpoint, `SCORE_IMAGES = 2000` and `SCORE_SAMPLERS = [(1, "euler"), (12, "euler"), (4, "heun"), (8, "heun"), (12, "heun"), (20, "heun")]`. `(1, "euler")` is the one-step estimate from pure noise, i.e. the posterior mean predicted at t = 0: it gives the highest PSNR / SSIM, the full sampler the best FID / LPIPS.
+#
+# FID from 500 images is biased upwards; compare it only with other 500-image FIDs. The rows are also written to `SCORE_CSV`. The functions defined here (`score_folder`, `sample_test_images`) are used by the baselines below as well.
+
+# %%
+import csv
+import shutil
+
+import lpips
+import torch_fidelity
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from torch.utils.data import DataLoader
+from torchvision.utils import save_image
+
+SCORE_CHECKPOINTS = []      # e.g. [f"{opt.checkpoint_dir}/flow_ema_epoch_{e}.pth" for e in range(40, 81, 5)]
+SCORE_SAMPLERS = [(opt.sample_steps, opt.solver)]   # (steps, solver) pairs, e.g. [(1, "euler"), (12, "heun")]
+SCORE_IMAGES = 500          # the first N test images, the same for every row
+SCORE_FID = True
+SCORE_CSV = "checkpoint_scores.csv"
+RATIO_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1.0]   # groups of the corrupted fraction
+
+if "lpips_fn" not in globals():
+    lpips_fn = lpips.LPIPS(net="alex", verbose=False).to(device).eval()
+
+if "load_flow_generator" not in globals():   # defined in the evaluation cell; repeated so that this cell runs on its own
+    def load_flow_generator(path):
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        cfg = ckpt.get("opt", {})
+        for key in ("pred", "img_size", "time_emb_dim", "full_res_skip"):
+            setattr(opt, key, cfg.get(key, getattr(opt, key)))
+        opt.mask_head = cfg.get("mask_head", False)
+        opt.use_wavelet = cfg.get("use_wavelet", True)
+        net = build_generator().to(device)
+        net.load_state_dict(ckpt["ema_g"])
+        return net.eval()
+
+
+def image_names(folder):
+    return sorted((f for f in os.listdir(folder) if is_image_file(f)), key=lambda f: int(os.path.splitext(f)[0]))
+
+
+def fresh_dir(folder):
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+
+
+def corrupted_fraction(name, real_dir, true_mask_dir=None, input_dir=None):
+    """Fraction of corrupted pixels of one test image: from its saved true mask if there is one, otherwise from the
+    pixels where the corrupted input and the ground truth differ (corruption_mask). None if neither is available."""
+    if true_mask_dir and os.path.exists(os.path.join(true_mask_dir, name)):
+        return TF.to_tensor(Image.open(os.path.join(true_mask_dir, name)).convert("L")).mean().item()
+    if input_dir and os.path.exists(os.path.join(input_dir, name)):
+        load = lambda folder: TF.to_tensor(Image.open(os.path.join(folder, name)).convert("RGB"))[None]
+        return corruption_mask(load(input_dir), load(real_dir)).mean().item()
+    return None
+
+
+def score_folder(fake_dir, real_dir=None, true_mask_dir=None, input_dir=None, with_fid=True, verbose=True):
+    """PSNR / SSIM on the saved 8-bit RGB images (as in the metric cell), LPIPS and FID of the images in fake_dir
+    against the ground truths of the same names in real_dir; with true masks or corrupted inputs also per group of
+    corrupted fraction. Returns the mean values."""
+    real_dir = real_dir or REAL_DIR
+    names = image_names(fake_dir)
+    psnr, ssim, lp, ratios = [], [], [], []
+    with torch.no_grad():
+        for name in names:
+            gt_img = Image.open(os.path.join(real_dir, name)).convert("RGB")
+            pr_img = Image.open(os.path.join(fake_dir, name)).convert("RGB")
+            gt, pr = np.asarray(gt_img, dtype=np.float64), np.asarray(pr_img, dtype=np.float64)
+            psnr.append(peak_signal_noise_ratio(gt, pr, data_range=255))
+            ssim.append(structural_similarity(gt, pr, data_range=255, channel_axis=2))
+            gt_t, pr_t = (TF.to_tensor(im)[None].to(device) * 2 - 1 for im in (gt_img, pr_img))
+            lp.append(lpips_fn(pr_t, gt_t).item())
+            ratios.append(corrupted_fraction(name, real_dir, true_mask_dir, input_dir))
+    result = {"psnr": float(np.mean(psnr)), "ssim": float(np.mean(ssim)), "lpips": float(np.mean(lp)),
+              "images": len(names)}
+    if with_fid:   # FID needs at least two images (a covariance); it is only meaningful for many more
+        result["fid"] = float("nan") if len(names) < 2 else torch_fidelity.calculate_metrics(
+            input1=fake_dir, input2=real_dir, cuda=torch.cuda.is_available(), fid=True, isc=False, kid=False,
+            verbose=False)["frechet_inception_distance"]
+    if verbose:
+        fid = "FID: %.3f   " % result["fid"] if with_fid else ""
+        print("PSNR: %.3f dB   SSIM: %.4f   LPIPS: %.4f   %s(%d images)" % (
+            result["psnr"], result["ssim"], result["lpips"], fid, len(names)))
+        if names and None not in ratios:
+            r, values = np.array(ratios), np.array([psnr, ssim, lp])
+            for lo, hi in zip(RATIO_EDGES[:-1], RATIO_EDGES[1:]):
+                idx = (r > lo) & (r <= hi)
+                if idx.any():
+                    p, s, l = values[:, idx].mean(axis=1)
+                    print("corrupted %3d-%3d%%: PSNR %.3f dB   SSIM %.4f   LPIPS %.4f   (%d images)" % (
+                        100 * lo, 100 * hi, p, s, l, idx.sum()))
+    return result
+
+
+def sample_test_images(net, out_dir, max_images, steps=None, solver=None, real_dir=None, true_mask_dir=None):
+    """Inpaints the first max_images test images into out_dir (<index>.png, seeded noise as in the evaluation cell)
+    and optionally saves their ground truths and true masks. Returns (images, seconds per image, mask F1 or None)."""
+    for folder in (out_dir, real_dir, true_mask_dir):
+        if folder:
+            fresh_dir(folder)
+    loader = DataLoader(get_test_set(opt.root_path, opt.direction), batch_size=opt.test_batch_size,
+                        shuffle=False, num_workers=2)
+    noise_gen = torch.Generator(device=device).manual_seed(opt.seed)
+    n, tp, fp, fn, elapsed = 0, 0, 0, 0, 0.0
+    with torch.no_grad():
+        for batch in loader:
+            real_a, real_b = batch[0][:max_images - n], batch[1][:max_images - n]
+            true_m = batch[2][:max_images - n] if len(batch) > 2 else corruption_mask(real_a, real_b)
+            noise = torch.randn(real_a.shape, device=device, generator=noise_gen)
+            tic = time.time()
+            fake_b, mask = inpaint(net, to_model_range(real_a.to(device)), noise=noise, steps=steps, solver=solver)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elapsed += time.time() - tic
+            fake_b = to_image_range(fake_b).cpu()
+            if mask is not None:
+                pred_m, true_b = mask.cpu() > 0.5, true_m > 0.5
+                tp += (pred_m & true_b).sum().item()
+                fp += (pred_m & ~true_b).sum().item()
+                fn += (~pred_m & true_b).sum().item()
+            for i in range(fake_b.size(0)):
+                save_image(fake_b[i], os.path.join(out_dir, f"{n}.png"))
+                if real_dir:
+                    save_image(real_b[i], os.path.join(real_dir, f"{n}.png"))
+                if true_mask_dir:
+                    save_image(true_m[i], os.path.join(true_mask_dir, f"{n}.png"))
+                n += 1
+            if n >= max_images:
+                break
+    f1 = 2 * tp / (2 * tp + fp + fn) if tp + fp + fn else None
+    return n, elapsed / max(n, 1), f1
+
+
+def score_checkpoints(paths, samplers, max_images, with_fid=True, csv_path=None):
+    rows = []
+    for path in paths:
+        net = load_flow_generator(path)
+        for steps, solver in samplers:
+            n, sec, f1 = sample_test_images(net, "score_fake", max_images, steps, solver,
+                                            real_dir="score_real", true_mask_dir="score_true_masks")
+            m = score_folder("score_fake", "score_real", true_mask_dir="score_true_masks", with_fid=with_fid,
+                             verbose=False)
+            row = dict(checkpoint=os.path.basename(path), steps=steps, solver=solver,
+                       nfe=2 * steps - 1 if solver == "heun" else steps, sec_per_image=round(sec, 4), images=n,
+                       psnr=round(m["psnr"], 3), ssim=round(m["ssim"], 4), lpips=round(m["lpips"], 4),
+                       fid=round(m["fid"], 3) if with_fid else None, mask_f1=None if f1 is None else round(f1, 4))
+            rows.append(row)
+            print("%-28s %5s N=%-3d NFE=%-3d %.3f s/img  PSNR %.3f  SSIM %.4f  LPIPS %.4f  FID %s  mask F1 %s" % (
+                row["checkpoint"], solver, steps, row["nfe"], sec, row["psnr"], row["ssim"], row["lpips"],
+                row["fid"], row["mask_f1"]))
+        del net
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+    if csv_path and rows:
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+    return rows
+
+
+if SCORE_CHECKPOINTS:
+    score_rows = score_checkpoints(SCORE_CHECKPOINTS, SCORE_SAMPLERS, SCORE_IMAGES, SCORE_FID, SCORE_CSV)
+
+# %% [markdown]
+# # Baselines on the same test images
+#
+# The evaluation cell saved the corrupted test inputs to `INPUT_DIR` and their ground truths to `REAL_DIR`. Each baseline below is run on these inputs, writes its results under the same file names to its own folder, and is scored with `score_folder`, exactly like WavTR-Flow. Run the evaluation cell and the cell above first.
+#
+# For methods with their own code (e.g. CAML, TransCNN-HAE, OmniWavNet), run their test script on the images of `INPUT_DIR`, put the results into a folder under the same file names and call `score_folder(folder, REAL_DIR, input_dir=INPUT_DIR)`.
+
+# %%
+def run_on_inputs(fn, out_dir, batch_size=None):
+    """fn: corrupted inputs (B, 3, H, W) in [0, 1] on the device -> results in [0, 1]. Applies fn to all images of
+    INPUT_DIR, writes the results to out_dir under the same names and returns the time per image in seconds."""
+    fresh_dir(out_dir)
+    names = image_names(INPUT_DIR)
+    batch_size = batch_size or opt.test_batch_size
+    elapsed = 0.0
+    with torch.no_grad():
+        for i in range(0, len(names), batch_size):
+            chunk = names[i:i + batch_size]
+            x = torch.stack([TF.to_tensor(Image.open(os.path.join(INPUT_DIR, name)).convert("RGB")) for name in chunk])
+            x = x.to(device)
+            tic = time.time()
+            y = fn(x).clamp(0, 1)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elapsed += time.time() - tic
+            for name, img in zip(chunk, y.cpu()):
+                save_image(img, os.path.join(out_dir, name))
+    return elapsed / max(len(names), 1)
+
+# %% [markdown]
+# ## WavTRGAN
+#
+# `WAVTRGAN_SOURCE` is the generator cell of the WavTRGAN notebook, unchanged. It is executed in a module of its own because several of its class names also exist in this notebook. Two lines are adapted when it is loaded so that it runs on any device: the DWT is created on the device of the input instead of with `.cuda()`, and so is the inverse DWT, which the old code created on the CPU (the `torch.cuda.FloatTensor` / `torch.FloatTensor` error of the old evaluation cell). Neither has weights. The checkpoint is loaded strictly, so it must match this architecture. WavTRGAN takes and returns images in [0, 1] and has no mask-guided output.
+
+# %%
+import types
+
+WAVTRGAN_WEIGHTS = ""   # the trained WavTRGAN generator, e.g. "/kaggle/input/archive-3/netG_model_epoch_14.pth"
+WAVTRGAN_DIR = "fake_images_wavtrgan"
+
+WAVTRGAN_SOURCE = r'''
+import math
+
+
+from collections import OrderedDict
+from pytorch_wavelets import DWTForward, DWTInverse
+import pywt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import copy
+#import logging
+import math
+
+from os.path import join as pjoin
+
+import torch
+import torch.nn as nn
+import numpy as np
+
+from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
+from torch.nn.modules.utils import _pair
+from scipy import ndimage
+
+######################Wavelets_function############################
+##################################################################
+
+
+
+###########################################
+#########Resnet Network###################
+#########################################
+
+class StdConv2d(nn.Conv2d):
+
+    def forward(self, x):
+        w = self.weight
+        v, m = torch.var_mean(w, dim=[1, 2, 3], keepdim=True, unbiased=False)
+        w = (w - m) / torch.sqrt(v + 1e-5)
+        return F.conv2d(x, w, self.bias, self.stride, self.padding,
+                        self.dilation, self.groups)
+
+
+def conv3x3(cin, cout, stride=1, groups=1, bias=False):
+    return StdConv2d(cin, cout, kernel_size=3, stride=stride,
+                     padding=1, bias=bias, groups=groups)
+
+
+def conv1x1(cin, cout, stride=1, bias=False):
+    return StdConv2d(cin, cout, kernel_size=1, stride=stride,
+                     padding=0, bias=bias)
+
+
+class PreActBottleneck(nn.Module):
+    """Pre-activation (v2) bottleneck block.
+    """
+
+    def __init__(self, cin, cout=None, cmid=None, stride=1):
+        super().__init__()
+        cout = cout or cin
+        cmid = cmid or cout//4
+
+        self.gn1 = nn.GroupNorm(32, cmid, eps=1e-6)
+        self.conv1 = conv1x1(cin, cmid, bias=False)
+        self.gn2 = nn.GroupNorm(32, cmid, eps=1e-6)
+        self.conv2 = conv3x3(cmid, cmid, stride, bias=False)  # Original code has it on conv1!!
+        self.gn3 = nn.GroupNorm(32, cout, eps=1e-6)
+        self.conv3 = conv1x1(cmid, cout, bias=False)
+        self.relu = nn.ReLU(inplace=True)
+
+        if (stride != 1 or cin != cout):
+            # Projection also with pre-activation according to paper.
+            self.downsample = conv1x1(cin, cout, stride, bias=False)
+            self.gn_proj = nn.GroupNorm(cout, cout)
+
+    def forward(self, x):
+
+        # Residual branch
+        residual = x
+        if hasattr(self, 'downsample'):
+            residual = self.downsample(x)
+            residual = self.gn_proj(residual)
+
+        # Unit's branch
+        y = self.relu(self.gn1(self.conv1(x)))
+        y = self.relu(self.gn2(self.conv2(y)))
+        y = self.gn3(self.conv3(y))
+
+        y = self.relu(residual + y)
+        return y
+
+class ResNetV2(nn.Module):
+    """Implementation of Pre-activation (v2) ResNet mode."""
+
+    def __init__(self, block_units, width_factor):
+        super().__init__()
+        width = int(64 * width_factor)
+        self.width = width
+
+        self.root = nn.Sequential(OrderedDict([
+            ('conv', StdConv2d(3, width, kernel_size=7, stride=2, bias=False, padding=3)),
+            ('gn',nn.GroupNorm(32, width, eps=1e-6)),
+            ('relu', nn.ReLU(inplace=True)),
+            #('pool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        ]))
+
+        self.body = nn.Sequential(OrderedDict([
+            ('block1', nn.Sequential(OrderedDict(
+                [('unit1', PreActBottleneck(cin=width, cout=width*4, cmid=width))] +
+                [(f'unit{i:d}', PreActBottleneck(cin=width*4, cout=width*4, cmid=width)) for i in range(2, block_units[0] + 1)],
+                ))),
+            ('block2', nn.Sequential(OrderedDict(
+                [('unit1', PreActBottleneck(cin=width*4, cout=width*8, cmid=width*2, stride=2))] +
+                [(f'unit{i:d}', PreActBottleneck(cin=width*8, cout=width*8, cmid=width*2)) for i in range(2, block_units[1] + 1)],
+                ))),
+            ('block3', nn.Sequential(OrderedDict(
+                [('unit1', PreActBottleneck(cin=width*8, cout=width*16, cmid=width*4, stride=2))] +
+                [(f'unit{i:d}', PreActBottleneck(cin=width*16, cout=width*16, cmid=width*4)) for i in range(2, block_units[2] + 1)],
+                ))),
+            
+        ]))
+
+    def forward(self, x):
+        features = []
+        b, c, in_size, _ = x.size()
+        x = self.root(x)
+        features.append(x)
+        x = nn.MaxPool2d(kernel_size=3, stride=2, padding=0)(x)
+        for i in range(len(self.body)-1):
+            x = self.body[i](x)
+            right_size = int(in_size / 4 / (i+1))
+            if x.size()[2] != right_size:
+                pad = right_size - x.size()[2]
+                assert pad < 3 and pad > 0, "x {} should {}".format(x.size(), right_size)
+                feat = torch.zeros((b, x.size()[1], right_size, right_size), device=x.device)
+                feat[:, :, 0:x.size()[2], 0:x.size()[3]] = x[:]
+            else:
+                feat = x
+            features.append(feat)
+        x = self.body[-1](x)
+        return x, features[::-1]
+    
+#####################################################
+############Vision Transformer Net###################
+####################################################
+################ Wavlet_Suery#######################
+
+
+class SSL(nn.Module):
+    def __init__(self, channels):
+        super(SSL, self).__init__()
+
+        # Convolutional layers for processing wavelet components
+        self.conv_approx = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.conv_horiz = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.conv_vert = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.conv_diag = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
+
+    def forward(self, x):
+        # Apply DWT to decompose the input image
+        dwt = DWTForward(J=1, mode='zero', wave='db3').cuda()
+        yl, yh = dwt(x)
+
+        # Extract detail coefficients
+        yh_out = yh[0]
+        ylh = yh_out[:, :, 0, :, :]  # Horizontal details
+        yhl = yh_out[:, :, 1, :, :]  # Vertical details
+        yhh = yh_out[:, :, 2, :, :]  # Diagonal details
+
+        # Process each wavelet component with CNNs
+        approx_features = self.conv_approx(yl)
+        horiz_features = self.conv_horiz(ylh)
+        vert_features = self.conv_vert(yhl)
+        diag_features = self.conv_diag(yhh)
+
+        # Reconstruct each component using the inverse wavelet transform
+        ifm = DWTInverse(wave='db3', mode='zero')
+
+        # Reconstruct horizontal component
+        rec_horiz = ifm((approx_features, [torch.stack((horiz_features, torch.zeros_like(horiz_features), torch.zeros_like(horiz_features)), dim=2)]))
+
+        # Reconstruct vertical component
+        rec_vert = ifm((approx_features, [torch.stack((torch.zeros_like(vert_features), vert_features, torch.zeros_like(vert_features)), dim=2)]))
+
+        # Reconstruct diagonal (spatial) component
+        rec_diag = ifm((approx_features, [torch.stack((torch.zeros_like(diag_features), torch.zeros_like(diag_features), diag_features), dim=2)]))
+
+        return rec_horiz, rec_vert, rec_diag
+
+#################################################
+
+def swish(x):
+    return x * torch.sigmoid(x)
+
+
+ACT2FN = {"gelu": torch.nn.functional.gelu, "relu": torch.nn.functional.relu, "swish": swish}
+
+
+class Attention(nn.Module):
+    def __init__(self, vis):
+        super(Attention, self).__init__()
+        self.vis = vis
+        self.num_attention_heads = 12
+        self.attention_head_size = int(768 / self.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+        #self.query = SSL(768)
+        self.query = Linear(768, self.all_head_size)
+        self.key = Linear(768, self.all_head_size)
+        self.value = Linear(768, self.all_head_size)
+
+        self.out = Linear(768, 768)
+        self.attn_dropout = Dropout(0.0)
+        self.proj_dropout = Dropout(0.1)
+
+        self.softmax = Softmax(dim=-1)
+
+ 
+    def transpose_for_scores(self, x):
+        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        x = x.view(*new_x_shape)
+        return x.permute(0, 2, 1, 3)
+    
+    def forward(self, hidden_states):
+       
+        mixed_query_layer = self.query(hidden_states)
+        mixed_key_layer = self.key(hidden_states)
+        mixed_value_layer = self.value(hidden_states)
+
+        
+        query_layer = self.transpose_for_scores(mixed_query_layer)
+        key_layer = self.transpose_for_scores(mixed_key_layer)
+        value_layer = self.transpose_for_scores(mixed_value_layer)
+
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        attention_probs = self.softmax(attention_scores)
+        weights = attention_probs if self.vis else None
+        attention_probs = self.attn_dropout(attention_probs)
+
+        context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(*new_context_layer_shape)
+        attention_output = self.out(context_layer)
+        attention_output = self.proj_dropout(attention_output)
+        return attention_output, weights
+
+class Mlp(nn.Module):
+    def __init__(self):
+        super(Mlp, self).__init__()
+        self.fc1 = Linear(768, 3072)
+        self.fc2 = Linear(3072, 768)
+        self.act_fn = ACT2FN["gelu"]
+        self.dropout = Dropout(0.1)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.normal_(self.fc1.bias, std=1e-6)
+        nn.init.normal_(self.fc2.bias, std=1e-6)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act_fn(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        x = self.dropout(x)
+        return x
+
+
+class Embeddings(nn.Module):
+    """Construct the embeddings from patch, position embeddings.
+    """
+    def __init__(self, img_size, in_channels=3):
+        super(Embeddings, self).__init__()
+        self.num_layers = (3, 4, 9)
+        self.width_factor = 1
+        img_size = _pair(img_size)
+
+        grid_size = (16,16)
+        patch_size = (img_size[0] // 16 // grid_size[0], img_size[1] // 16 // grid_size[1])
+        patch_size_real = (patch_size[0] * 16, patch_size[1] * 16)
+        n_patches = (img_size[0] // patch_size_real[0]) * (img_size[1] // patch_size_real[1])  
+        
+        self.hybrid_model = ResNetV2(block_units=self.num_layers, width_factor=self.width_factor)
+        in_channels = self.hybrid_model.width * 16
+        
+        self.patch_embeddings = Conv2d(in_channels=in_channels,
+                                       out_channels=768,
+                                       kernel_size=patch_size,
+                                       stride=patch_size)
+        self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches, 768))
+
+        self.dropout = Dropout(0.1)
+
+        self.wavelet = SSL(3)
+        self.conv_layer = nn.Conv2d(in_channels=6, out_channels=3, kernel_size=1, stride=1, padding=0).to(device)
+        self.conv_con = nn.Conv2d(in_channels=1024, out_channels=3, kernel_size=1, stride=1, padding=0).to(device)
+    def forward(self, x, use_wavelet=True):
+
+        if use_wavelet:
+            x_h, x_v, x_sp = self.wavelet(x)
+        else:
+            # no wavelet contribution
+            x_h = torch.zeros_like(x)
+            x_v = torch.zeros_like(x)
+            x_sp = torch.zeros_like(x)
+    
+        
+
+        #extract horizontal features by ResNet
+        x_h = torch.cat((x, x_h),1)
+        x_h = self.conv_layer(x_h)
+        x_h, features = self.hybrid_model(x_h)
+    
+        #extract vertical features by ResNet
+        x_v = torch.cat((x, x_v),1)
+        x_v = self.conv_layer(x_v)
+        x_v, features = self.hybrid_model(x_v)
+
+        #extract diagonal features by ResNet
+        x_sp = torch.cat((x, x_sp),1)
+        x_sp = self.conv_layer(x_sp)
+        x_sp, features = self.hybrid_model(x_sp)
+
+        x = x_h +x_v +x_sp
+        
+        x = self.patch_embeddings(x)  # (B, hidden. n_patches^(1/2), n_patches^(1/2))
+        x = x.flatten(2)
+        x = x.transpose(-1, -2)  # (B, n_patches, hidden)
+
+        embeddings = x + self.position_embeddings
+        embeddings = self.dropout(embeddings)
+        return embeddings, features
+
+
+class Block(nn.Module):
+    def __init__(self, vis):
+        super(Block, self).__init__()
+        self.hidden_size = 768
+        self.attention_norm = LayerNorm(768, eps=1e-6)
+        self.ffn_norm = LayerNorm(768, eps=1e-6)
+        self.ffn = Mlp()
+        self.attn = Attention(vis)
+
+    def forward(self, x):
+        h = x
+        x = self.attention_norm(x)
+        x, weights = self.attn(x)
+        x = x + h
+
+        h = x
+        x = self.ffn_norm(x)
+        x = self.ffn(x)
+        x = x + h
+        return x, weights
+
+class Encoder(nn.Module):
+    def __init__(self, vis):
+        super(Encoder, self).__init__()
+        self.vis = vis
+        self.layer = nn.ModuleList()
+        self.encoder_norm = LayerNorm(768, eps=1e-6)
+        for _ in range(3):  #number of block of tranformers layer
+            layer = Block(vis)
+            self.layer.append(copy.deepcopy(layer))
+
+    def forward(self, hidden_states):
+        attn_weights = []
+        for layer_block in self.layer:
+            hidden_states, weights = layer_block(hidden_states)
+            if self.vis:
+                attn_weights.append(weights)
+        encoded = self.encoder_norm(hidden_states)
+        return encoded, attn_weights
+
+
+class Transformer(nn.Module):
+    def __init__(self, img_size, vis):
+        super(Transformer, self).__init__()
+        self.embeddings = Embeddings(img_size=img_size)
+        self.encoder = Encoder(vis)
+
+    def forward(self, input_ids):
+        embedding_output, features = self.embeddings(input_ids)
+        encoded, attn_weights = self.encoder(embedding_output)  # (B, n_patch, hidden)
+        return encoded, attn_weights, features
+
+
+class Conv2dReLU(nn.Sequential):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            kernel_size,
+            padding=0,
+            stride=1,
+            use_batchnorm=True,
+    ):
+        conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=not (use_batchnorm),
+        )
+        relu = nn.ReLU(inplace=True)
+
+        bn = nn.BatchNorm2d(out_channels)
+
+        super(Conv2dReLU, self).__init__(conv, bn, relu)
+
+
+class DecoderBlock(nn.Module):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            skip_channels=3,
+            use_batchnorm=True,
+    ):
+        super().__init__()
+        self.conv1 = Conv2dReLU(
+            in_channels + skip_channels,
+            out_channels,
+            kernel_size=3,
+            padding=1,
+            use_batchnorm=use_batchnorm,
+        )
+        self.conv2 = Conv2dReLU(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            padding=1,
+            use_batchnorm=use_batchnorm,
+        )
+        self.up = nn.UpsamplingBilinear2d(scale_factor=2)
+
+    def forward(self, x, skip=None):
+        x = self.up(x)
+        if skip is not None:
+            x = torch.cat([x, skip], dim=1)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
+
+class SegmentationHead(nn.Sequential):
+
+    def __init__(self, in_channels, out_channels, kernel_size=3, upsampling=1):
+        conv2d = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=kernel_size // 2)
+        upsampling = nn.UpsamplingBilinear2d(scale_factor=upsampling) if upsampling > 1 else nn.Identity()
+        super().__init__(conv2d, upsampling)
+
+
+class DecoderCup(nn.Module):
+    def __init__(self):
+        super().__init__()
+        head_channels = 512
+        self.conv_more = Conv2dReLU(
+            768,
+            head_channels,
+            kernel_size=3,
+            padding=1,
+            use_batchnorm=True,
+        )
+
+        self.projection_layer = nn.Conv2d(768, 512, kernel_size=1)
+        decoder_channels = (256, 128, 64, 16)
+        in_channels = [head_channels] + list(decoder_channels[:-1])
+        out_channels = decoder_channels
+        skip_channels = [512, 256, 64, 16]
+        self.n_skip = 3
+        for i in range(4-self.n_skip):  # re-select the skip channels according to n_skip
+            skip_channels[3-i]=0
+
+        blocks = [
+            DecoderBlock(in_ch, out_ch, sk_ch) for in_ch, out_ch, sk_ch in zip(in_channels, out_channels, skip_channels)
+        ]
+        self.blocks = nn.ModuleList(blocks)
+
+    def forward(self, hidden_states, features=None):
+        B, n_patch, hidden = hidden_states.size()  # reshape from (B, n_patch, hidden) to (B, h, w, hidden)
+        h, w = int(np.sqrt(n_patch)), int(np.sqrt(n_patch))
+        x = hidden_states.permute(0, 2, 1)
+        x = x.contiguous().view(B, hidden, h, w)
+        
+        x = self.conv_more(x)
+  
+        for i, decoder_block in enumerate(self.blocks):
+            if features is not None:
+                skip = features[i] if (i < self.n_skip) else None
+            else:
+                skip = None
+            x = decoder_block(x, skip=skip)
+        return x
+
+#////////////////////////////////////////////
+#Using Transformers as Encoder
+#///////////////////////////////////////////
+class VisionTransformer(nn.Module):
+    def __init__(self, img_size=256, num_classes=21843, zero_head=False, vis=False):
+        super(VisionTransformer, self).__init__()
+        self.zero_head = zero_head
+        self.transformer = Transformer(img_size, vis)
+        self.decoder = DecoderCup()
+        self.segmentation_head = SegmentationHead(
+            in_channels=16,
+            out_channels=3,
+            kernel_size=3,
+        )
+        
+    def forward(self, x, return_attn=False, use_wavelet=True):
+        if x.size()[1] == 1:
+            x = x.repeat(1,3,1,1)
+       
+        #x_input = x
+        #x = self.wavelet_transform(x)
+        #x = x + x_input
+        
+        x, attn_weights, features = self.transformer(x)  # (B, n_patch, hidden)
+        x = self.decoder(x, features)
+        
+        x = self.segmentation_head(x)
+
+        if return_attn:
+            return x, attn_weights
+        return x
+'''
+
+
+def build_wavtrgan(path):
+    src = WAVTRGAN_SOURCE
+    for old, new in [("DWTForward(J=1, mode='zero', wave='db3').cuda()", "DWTForward(J=1, mode='zero', wave='db3').to(x.device)"),
+                     ("ifm = DWTInverse(wave='db3', mode='zero')", "ifm = DWTInverse(wave='db3', mode='zero').to(x.device)")]:
+        assert src.count(old) == 1, old
+        src = src.replace(old, new)
+    module = types.ModuleType("wavtrgan_generator")
+    module.device = device   # used by Embeddings.__init__
+    exec(compile(src, "wavtrgan_generator", "exec"), module.__dict__)
+    net = module.VisionTransformer(img_size=256, num_classes=9)
+    net.load_state_dict(load_generator_state(path))   # strict: the checkpoint must match this architecture
+    return net.to(device).eval()
+
+
+if WAVTRGAN_WEIGHTS:
+    wavtrgan = build_wavtrgan(WAVTRGAN_WEIGHTS)
+    print("WavTRGAN: %.3f s per image" % run_on_inputs(wavtrgan, WAVTRGAN_DIR))
+    wavtrgan_scores = score_folder(WAVTRGAN_DIR, REAL_DIR, true_mask_dir=globals().get("TRUE_MASK_DIR"),
+                                   input_dir=INPUT_DIR)
+
+# %% [markdown]
+# ## IR-SDE
+#
+# IR-SDE (Luo et al., ICML 2023) inpaints 256x256 CelebA-HQ faces whose holes are filled with white, without being given the mask, i.e. the white setting of this notebook. Download its inpainting generator from the authors' "Weights and Results" Google Drive folder linked at https://github.com/Algolzw/image-restoration-sde (inpainting model), add the file to the notebook as a dataset and set `IRSDE_WEIGHTS`; the code is cloned from GitHub (internet on). The released model was trained on the "thin" masks of RePaint, which cover about 30% of the image on average, and is evaluated here without retraining, so report it as such. Sampling follows the authors' `test.py` and `ir-sde.yml`: 100 reverse SDE steps from the corrupted image plus noise (`max_sigma = 30`, cosine schedule).
+
+# %%
+IRSDE_WEIGHTS = ""   # e.g. "/kaggle/input/irsde-inpainting/ir-sde.pth"
+IRSDE_REPO = "image-restoration-sde"
+IRSDE_DIR = "fake_images_irsde"
+
+
+def build_irsde(weights, repo=IRSDE_REPO):
+    import importlib.util
+    import subprocess
+    import sys
+    if not os.path.isdir(repo):
+        subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Algolzw/image-restoration-sde", repo],
+                       check=True)
+
+    def load_module(name, path, package=False):   # under its own name: "models" / "utils" are common module names
+        spec = importlib.util.spec_from_file_location(
+            name, path, submodule_search_locations=[os.path.dirname(path)] if package else None)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    arch = load_module("irsde_modules", os.path.join(repo, "codes/config/inpainting/models/modules/__init__.py"),
+                       package=True)
+    sde_utils = load_module("irsde_sde_utils", os.path.join(repo, "codes/utils/sde_utils.py"))
+    net = arch.ConditionalUNet(in_nc=3, out_nc=3, nf=64, depth=4)   # network_G of options/test/ir-sde.yml
+    state = torch.load(weights, map_location="cpu")
+    if any(k.startswith("ema_model.") for k in state):   # a file of the EMA wrapper: keep the averaged weights
+        state = {k[len("ema_model."):]: v for k, v in state.items() if k.startswith("ema_model.")}
+    net.load_state_dict({k[len("module."):] if k.startswith("module.") else k: v for k, v in state.items()})
+    sde = sde_utils.IRSDE(max_sigma=30, T=100, schedule="cosine", eps=0.005, device=device)   # sde of ir-sde.yml
+    sde.set_model(net.to(device).eval())
+    return sde
+
+
+def irsde_inpaint(sde, lq):
+    """Reverse SDE from the corrupted images lq (B, 3, H, W) in [0, 1]; sde.reverse_sde without the progress bar."""
+    sde.set_mu(lq)
+    x = sde.noise_state(lq)
+    for t in reversed(range(1, sde.T + 1)):
+        x = sde.reverse_sde_step(x, sde.score_fn(x, t), t)
+    return x
+
+
+if IRSDE_WEIGHTS:
+    torch.manual_seed(opt.seed)
+    irsde = build_irsde(IRSDE_WEIGHTS)
+    print("IR-SDE: %.3f s per image" % run_on_inputs(lambda x: irsde_inpaint(irsde, x), IRSDE_DIR))
+    irsde_scores = score_folder(IRSDE_DIR, REAL_DIR, true_mask_dir=globals().get("TRUE_MASK_DIR"),
+                                input_dir=INPUT_DIR)
