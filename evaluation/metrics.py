@@ -11,6 +11,7 @@ never see the mask) and non-blind methods (which are given it).
 
 import numpy as np
 from PIL import Image
+from scipy import linalg
 from skimage.metrics import structural_similarity
 
 # PSNR is capped so a perfect reconstruction does not turn a mean into inf.
@@ -61,6 +62,25 @@ def ssim(pred, gt, mask=None):
 def l1(pred, gt, mask=None):
     abs_err = np.abs(pred - gt)
     return float(abs_err[mask].mean() if mask is not None else abs_err.mean())
+
+
+def frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
+    """FID between two Gaussians, as in pytorch-fid.
+
+    Reimplemented because pytorch-fid 0.3.0 calls sqrtm(..., disp=False),
+    which SciPy 1.18 no longer accepts.
+    """
+    covmean = linalg.sqrtm(sigma1 @ sigma2)
+    if not np.isfinite(covmean).all():
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = linalg.sqrtm((sigma1 + offset) @ (sigma2 + offset))
+    if np.iscomplexobj(covmean):
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+            raise ValueError(f"imaginary component {np.max(np.abs(covmean.imag))}")
+        covmean = covmean.real
+    diff = mu1 - mu2
+    # FID is non-negative; clamp the rounding error of identical statistics.
+    return max(0.0, float(diff @ diff + np.trace(sigma1) + np.trace(sigma2) - 2 * np.trace(covmean)))
 
 
 def image_metrics(pred, gt, mask, source=None):

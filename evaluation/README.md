@@ -14,7 +14,7 @@ metric code.
 ## Install
 
 ```bash
-pip install -r requirements-eval.txt       # numpy, pillow, scikit-image
+pip install -r requirements-eval.txt       # numpy, pillow, scipy, scikit-image
 pip install torch torchvision pytorch-fid  # only for --fid
 ```
 
@@ -70,6 +70,10 @@ Run `python -m pytest` from the repository root to run the tests.
 - **PSNR**: images in [0, 1], MSE over all RGB values of the region, capped at 100 dB.
 - **SSIM**: RGB, Gaussian window (σ = 1.5), as in Wang et al. (2004). Hole SSIM
   is the full-image SSIM map averaged over hole pixels.
+- **FID**: pytorch-fid's Inception weights; the Fréchet distance is computed in
+  `metrics.py` because pytorch-fid 0.3.0 breaks on SciPy 1.18. With fewer than
+  2048 test images the covariance is singular (SciPy warns) and FID is noisy;
+  Paris StreetView, for instance, has only 100 test images.
 - **Std over seeds**: sample standard deviation (n − 1).
 
 Hole-only metrics are the fairest way to compare blind and non-blind methods.

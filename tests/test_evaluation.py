@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from evaluation import aggregate, evaluate, masks, pick_examples
-from evaluation.metrics import MAX_PSNR, composite, image_metrics, psnr, ssim
+from evaluation.metrics import MAX_PSNR, composite, frechet_distance, image_metrics, psnr, ssim
 
 SIZE = 64
 
@@ -90,6 +90,15 @@ def test_hole_metrics_are_invariant_to_compositing():
     mask = square_mask()
     comp = composite(pred, gt, mask)
     assert psnr(comp, gt, mask) == psnr(pred, gt, mask)
+
+
+def test_frechet_distance_diagonal_gaussians():
+    # For diagonal covariances FID = |mu1 - mu2|^2 + sum((sqrt(s1) - sqrt(s2))^2).
+    mu1, mu2 = np.array([0.0, 1.0, 2.0]), np.array([1.0, 1.0, 0.0])
+    s1, s2 = np.array([1.0, 4.0, 9.0]), np.array([4.0, 4.0, 1.0])
+    expected = 1.0 + 4.0 + (1.0 + 0.0 + 4.0)
+    assert frechet_distance(mu1, np.diag(s1), mu2, np.diag(s2)) == pytest.approx(expected)
+    assert frechet_distance(mu1, np.diag(s1), mu1, np.diag(s1)) == pytest.approx(0.0, abs=1e-9)
 
 
 # --- evaluate (end to end) -------------------------------------------------

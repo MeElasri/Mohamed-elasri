@@ -20,7 +20,8 @@ import numpy as np
 from PIL import Image
 
 from evaluation.masks import list_images
-from evaluation.metrics import MAX_PSNR, SSIM_SETTINGS, composite, image_metrics, load_mask, load_rgb
+from evaluation.metrics import (MAX_PSNR, SSIM_SETTINGS, composite, frechet_distance, image_metrics, load_mask,
+                                load_rgb)
 
 DEFAULT_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1.0]
 
@@ -48,10 +49,14 @@ def to_uint8(img):
     return (np.clip(img, 0, 1) * 255 + 0.5).astype(np.uint8)
 
 
-def compute_fid(dir_a, dir_b, device, batch_size):
-    from pytorch_fid.fid_score import calculate_fid_given_paths
+def fid_statistics(folders, device, batch_size):
+    """Inception pool3 (2048-d) mean and covariance per folder, with pytorch-fid weights."""
+    from pytorch_fid.fid_score import compute_statistics_of_path
+    from pytorch_fid.inception import InceptionV3
 
-    return float(calculate_fid_given_paths([dir_a, dir_b], batch_size, device, 2048, num_workers=0))
+    model = InceptionV3([InceptionV3.BLOCK_INDEX_BY_DIM[2048]]).to(device)
+    return {k: compute_statistics_of_path(d, model, batch_size, 2048, device, num_workers=0)
+            for k, d in folders.items()}
 
 
 def main(argv=None):
@@ -128,8 +133,9 @@ def main(argv=None):
 
     overall = mean_metrics(rows, metric_keys)
     if fid_root:
-        overall["fid_full"] = compute_fid(fid_dirs["gt"], fid_dirs["pred"], args.fid_device, args.fid_batch_size)
-        overall["fid_full_comp"] = compute_fid(fid_dirs["gt"], fid_dirs["comp"], args.fid_device, args.fid_batch_size)
+        stats = fid_statistics(fid_dirs, args.fid_device, args.fid_batch_size)
+        overall["fid_full"] = frechet_distance(*stats["gt"], *stats["pred"])
+        overall["fid_full_comp"] = frechet_distance(*stats["gt"], *stats["comp"])
         fid_root.cleanup()
 
     bins = {}
