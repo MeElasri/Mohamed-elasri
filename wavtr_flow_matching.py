@@ -1007,8 +1007,10 @@ class StyleLoss(nn.Module):
     @staticmethod
     def compute_gram(x):
         b, ch, h, w = x.size()
-        f = x.reshape(b, ch, h * w)
-        return f.bmm(f.transpose(1, 2)) / (h * w * ch)
+        f = x.float().reshape(b, ch, h * w)
+        # in float32 even under mixed precision: in float16 this sum over h*w positions overflows (max 65504)
+        with torch.autocast(device_type=f.device.type, enabled=False):
+            return f.bmm(f.transpose(1, 2)) / (h * w * ch)
 
     def forward(self, x, y):
         style_loss = 0.0
