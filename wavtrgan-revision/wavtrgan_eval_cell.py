@@ -69,11 +69,10 @@ def masked_psnr(gt, pr, m):
     return np.inf if mse == 0 else 10 * np.log10(255.0 ** 2 / mse)
 
 
-def masked_ssim(gt, pr, m):
-    """Mean of the SSIM map over the pixels where m is True."""
+def masked_ssim(smap, m):
+    """Mean of an SSIM map (H x W x C, from structural_similarity(..., full=True)) over the pixels where m is True."""
     if m.sum() == 0:
         return np.nan
-    _, smap = structural_similarity(gt, pr, data_range=255, channel_axis=2, full=True)
     return smap.mean(axis=2)[m].mean()
 
 
@@ -98,9 +97,10 @@ def evaluate(methods, gt_dir, input_dir, out_csv="metrics.csv", lpips_on=True, f
             inp = load_rgb(os.path.join(input_dir, g), size=(gt.shape[1], gt.shape[0]))
             hole = (np.abs(inp - gt).max(axis=2) > HOLE_THRESHOLD * 255)
             r["psnr"].append(peak_signal_noise_ratio(gt, pr, data_range=255))
-            r["ssim"].append(structural_similarity(gt, pr, data_range=255, channel_axis=2))
+            ssim_val, smap = structural_similarity(gt, pr, data_range=255, channel_axis=2, full=True)   # one SSIM pass
+            r["ssim"].append(ssim_val)
             r["psnr_hole"].append(masked_psnr(gt, pr, hole))
-            r["ssim_hole"].append(masked_ssim(gt, pr, hole))
+            r["ssim_hole"].append(masked_ssim(smap, hole))
             r["psnr_known"].append(masked_psnr(gt, pr, ~hole))
             r["ratio"].append(hole.mean())
             if lp is not None:
