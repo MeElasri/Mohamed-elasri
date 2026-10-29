@@ -17,8 +17,8 @@ from skimage.metrics import structural_similarity
 # PSNR is capped so a perfect reconstruction does not turn a mean into inf.
 MAX_PSNR = 100.0
 
-# Gaussian-window SSIM as in Wang et al. (2004), computed on RGB.
-SSIM_SETTINGS = {"gaussian_weights": True, "sigma": 1.5, "use_sample_covariance": False}
+# RGB SSIM with scikit-image's default 7x7 uniform window, as in the WavTRGAN notebooks.
+SSIM_SETTINGS = {"win_size": 7, "gaussian_weights": False, "use_sample_covariance": True}
 
 
 def load_rgb(path, size=None):

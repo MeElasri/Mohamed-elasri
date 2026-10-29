@@ -22,7 +22,7 @@ import numpy as np
 LOWER_IS_BETTER = ("l1", "fid", "lpips")
 DECIMALS = {"psnr": 2, "ssim": 3, "l1": 4, "fid": 2, "lpips": 3}
 NAMES = {"psnr": "PSNR", "ssim": "SSIM", "l1": "L1", "fid": "FID", "lpips": "LPIPS"}
-SUFFIXES = {"_full_comp": " (comp.)", "_full": "", "_hole": " (hole)"}
+SUFFIXES = {"_full_comp": " (comp.)", "_full": "", "_hole": " (hole)", "_known": " (known)"}
 
 
 def metric_base(metric):

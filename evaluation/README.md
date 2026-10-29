@@ -47,6 +47,20 @@ python -m evaluation.pick_examples --csv WavTRGAN=eval/wavtrgan_seed0/per_image.
 
 Run `python -m pytest` from the repository root to run the tests.
 
+### With the WavTRGAN notebooks
+
+`evaluate()` in `wavtrgan-revision/` computes the same PSNR/SSIM definitions as
+`evaluate.py` and writes, per method, `<out_csv>_<method>.json` (same format as
+`summary.json`) and `<out_csv>_<method>_per_image.csv`. Pass the JSON files of the
+three seeds to `aggregate.py` and the per-image CSVs to `pick_examples.py`:
+
+```bash
+python -m evaluation.aggregate \
+    --method WavTRGAN seed0/test_metrics_WavTRGAN.json seed1/test_metrics_WavTRGAN.json seed2/test_metrics_WavTRGAN.json \
+    --method CAML eval/metrics_CAML.json \
+    --metrics psnr_full ssim_full psnr_full_comp psnr_hole ssim_hole lpips_full fid_full --out tables/table2
+```
+
 ## Conventions
 
 - Files are matched by stem across `--gt`, `--pred`, `--masks`, `--input`
@@ -68,8 +82,8 @@ Run `python -m pytest` from the repository root to run the tests.
 | `fid_full`, `fid_full_comp` | FID (pytorch-fid, Inception pool3, 2048-d) between ground truth and outputs |
 
 - **PSNR**: images in [0, 1], MSE over all RGB values of the region, capped at 100 dB.
-- **SSIM**: RGB, Gaussian window (σ = 1.5), as in Wang et al. (2004). Hole SSIM
-  is the full-image SSIM map averaged over hole pixels.
+- **SSIM**: RGB, scikit-image's default 7×7 uniform window, the same as the
+  WavTRGAN notebooks. Hole SSIM is the full-image SSIM map averaged over hole pixels.
 - **FID**: pytorch-fid's Inception weights; the Fréchet distance is computed in
   `metrics.py` because pytorch-fid 0.3.0 breaks on SciPy 1.18. With fewer than
   2048 test images the covariance is singular (SciPy warns) and FID is noisy;
@@ -92,6 +106,6 @@ receives.
 > the full image and on the corrupted region only. Full-image metrics are
 > computed on the raw network output [and, in Table X, after compositing it with
 > the uncorrupted input]. Hole-region metrics are unaffected by compositing.
-> SSIM uses a Gaussian window (σ = 1.5) on RGB images. FID is computed between
+> SSIM uses a 7×7 uniform window on RGB images. FID is computed between
 > the [N] outputs and the ground-truth images with pytorch-fid. WavTRGAN results
 > are the mean ± standard deviation over three training seeds.

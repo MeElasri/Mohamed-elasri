@@ -23,7 +23,7 @@ from evaluation.masks import list_images
 from evaluation.metrics import (MAX_PSNR, SSIM_SETTINGS, composite, frechet_distance, image_metrics, load_mask,
                                 load_rgb)
 
-DEFAULT_EDGES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1.0]
+DEFAULT_EDGES = [i / 10 for i in range(11)]      # 10% bins, as in the WavTRGAN notebooks
 
 
 def index_by_stem(folder):
@@ -155,7 +155,7 @@ def main(argv=None):
             "hole_value": args.hole_value,
             "composite_source": "input" if args.input else "gt",
             "resized_outputs": resized,
-            "ssim": {"color": "rgb", "window": "gaussian", **SSIM_SETTINGS},
+            "ssim": {"color": "rgb", **SSIM_SETTINGS},
             "psnr_cap_db": MAX_PSNR,
             "hole_ssim": "full-image SSIM map averaged over hole pixels",
         },
