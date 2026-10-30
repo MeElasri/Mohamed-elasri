@@ -3,9 +3,9 @@
 #
 # Part 1  generate_wavtrgan(): runs WavTRGAN on the test pairs WITHOUT random crop / flip and
 #         saves input, ground truth and output under the SAME file name (needed for fair,
-#         reproducible pairs and for hole-only metrics). If the test set has exact masks
-#         (test_root/mask, written by make_corrupted_dataset.py), they are saved too: give them
-#         to the non-blind baselines and to evaluate(mask_dir=...).
+#         reproducible pairs and for hole-only metrics). Exact masks (test_root/mask, or any folder
+#         given as mask_dir, e.g. the mask/ folder written by generate_mask.ipynb) are saved too at
+#         the same size: give them to the non-blind baselines and to evaluate(mask_dir=...).
 # Part 2  evaluate(): scores every method on the same pairs:
 #         - PSNR / SSIM on float images (no uint8 overflow), full image, RGB
 #         - the same after compositing (output inside the hole, input outside)
@@ -58,11 +58,20 @@ def load_rgb(path, size=None):
 
 
 def load_mask(path, size):
-    """Binary mask (True = corrupted) from a PNG with white holes, resized with nearest neighbour."""
+    """Binary mask (True = corrupted) from a PNG or JPEG with white holes, at `size`. A larger mask is shrunk like
+    the images (bicubic): a pixel is corrupted if more than 2% of it is, as some white leaks into it."""
     im = Image.open(path).convert("L")
+    mask = np.asarray(im) > 127                     # binary first: JPEG masks have soft edges
     if im.size != size:
-        im = im.resize(size, Image.NEAREST)
-    return np.asarray(im) > 127
+        shrink = im.size[0] > size[0]
+        im = Image.fromarray(mask.astype(np.uint8) * 255).resize(size, Image.BICUBIC if shrink else Image.NEAREST)
+        mask = np.asarray(im) > (5 if shrink else 127)
+    return mask
+
+
+def masks_by_stem(folder):
+    """{file stem: path} of the mask images of a folder, so that 12.jpg is the mask of test image 12.png."""
+    return {os.path.splitext(f)[0]: os.path.join(folder, f) for f in names_in(folder)}
 
 
 def names_in(folder):
@@ -73,14 +82,15 @@ def names_in(folder):
 # Part 1: WavTRGAN outputs on fixed pairs (run in the WavTRGAN notebook, after the model cells)
 # ---------------------------------------------------------------------------------------------
 @torch.no_grad()
-def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, device="cuda"):
-    """test_root/{a,b}: clean / corrupted pairs with identical names (and optionally test_root/mask).
-    Writes out_root/{input,gt,wavtrgan} and out_root/mask (the exact masks of test_root/mask) or, without them,
+def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, device="cuda", mask_dir=None):
+    """test_root/{a,b}: clean / corrupted pairs with identical names. Exact masks: mask_dir, or test_root/mask.
+    Writes out_root/{input,gt,wavtrgan} and out_root/mask (the exact masks) or, without them,
     out_root/mask_estimated (estimate_hole): give these masks to the non-blind baselines."""
     corrupted_dir, clean_dir = (os.path.join(test_root, "b"), os.path.join(test_root, "a")) if direction == "b2a" \
         else (os.path.join(test_root, "a"), os.path.join(test_root, "b"))
-    mask_src = os.path.join(test_root, "mask")
-    keys = ("input", "gt", "wavtrgan") + (("mask",) if os.path.isdir(mask_src) else ("mask_estimated",))
+    mask_src = mask_dir or os.path.join(test_root, "mask")
+    mask_files = masks_by_stem(mask_src) if os.path.isdir(mask_src) else None
+    keys = ("input", "gt", "wavtrgan") + (("mask",) if mask_files else ("mask_estimated",))
     dirs = {k: os.path.join(out_root, k) for k in keys}
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -95,7 +105,9 @@ def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, dev
         for key, arr in (("input", inp), ("gt", gt), ("wavtrgan", y)):
             Image.fromarray((arr * 255).round().astype(np.uint8)).save(os.path.join(dirs[key], stem))
         if "mask" in dirs:
-            mask = load_mask(os.path.join(mask_src, stem), (size, size))
+            if os.path.splitext(name)[0] not in mask_files:
+                raise FileNotFoundError("no mask for %s in %s" % (name, mask_src))
+            mask = load_mask(mask_files[os.path.splitext(name)[0]], (size, size))
             Image.fromarray(mask.astype(np.uint8) * 255).save(os.path.join(dirs["mask"], stem))
         else:   # the same estimate as evaluate() without mask_dir, on the saved 8-bit images
             i8, g8 = (inp * 255).round(), (gt * 255).round()
@@ -105,7 +117,9 @@ def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, dev
             thr_pixels += (np.abs(i8 - g8).max(axis=2) > HOLE_THRESHOLD * 255).sum()
             all_pixels += mask.size
     print("saved", len(names_in(dirs["input"])), "pairs to", out_root)
-    if "mask" not in dirs:
+    if "mask" in dirs:
+        print("exact masks from %s saved to mask/" % mask_src)
+    else:
         print("%s has no mask/ folder: estimated masks (%s) saved to mask_estimated/, %.1f%% of the pixels "
               "(the difference threshold alone: %.1f%%)" % (test_root, estimate_name(), 100 * est_pixels / all_pixels,
                                                            100 * thr_pixels / all_pixels))
@@ -157,6 +171,7 @@ def evaluate(methods, gt_dir, input_dir, out_csv="metrics.csv", lpips_on=True, f
     if lpips_on:
         import lpips
         lp = lpips.LPIPS(net="alex", verbose=False).to(device).eval()
+    mask_files = masks_by_stem(mask_dir) if mask_dir else None
     base = os.path.splitext(out_csv)[0]
     rows = []
     for method, folder in methods.items():
@@ -174,7 +189,9 @@ def evaluate(methods, gt_dir, input_dir, out_csv="metrics.csv", lpips_on=True, f
                 resized += 1
             inp = load_rgb(os.path.join(input_dir, g), size=size)
             if mask_dir:
-                hole = load_mask(os.path.join(mask_dir, os.path.splitext(g)[0] + ".png"), size)
+                if os.path.splitext(g)[0] not in mask_files:
+                    raise FileNotFoundError("no mask for %s in %s" % (g, mask_dir))
+                hole = load_mask(mask_files[os.path.splitext(g)[0]], size)
             else:
                 hole = estimate_hole(inp, gt)
             comp = np.where(hole[..., None], pr, inp)   # output inside the hole, uncorrupted input outside
@@ -254,7 +271,8 @@ def sanity_check():
 # ---------------------------------------------------------------------------------------------
 # sanity_check()
 # WHITE_FILL = True                                                               # white fill, no mask/ folder
-# generate_wavtrgan(model, "/kaggle/input/<dataset>/test", "eval_40_50")          # WavTRGAN outputs (+ mask/)
+# generate_wavtrgan(model, "/kaggle/input/<dataset>/test", "eval_40_50",         # WavTRGAN outputs (+ mask/)
+#                   mask_dir="/kaggle/input/<masks>/mask")                        # exact masks, e.g. 12.jpg for 12.png
 # evaluate({"WavTRGAN": "eval_40_50/wavtrgan",
 #           "Blind-Omni-Wav-Net": "eval_40_50/omniwavnet",                         # same file names
 #           "CAML": "eval_40_50/caml"},
