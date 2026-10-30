@@ -13,7 +13,8 @@
 #         - LPIPS (AlexNet), FID (torch-fidelity)
 #         The hole is the exact mask when mask_dir is given. Without it, the hole is estimated as the
 #         pixels where input and ground truth differ by > HOLE_THRESHOLD, which misses corrupted
-#         pixels whose fill looks like the original: use exact masks for the paper.
+#         pixels whose fill looks like the original. For an opaque white fill, set WHITE_FILL = True:
+#         white input pixels then also count as corrupted, which recovers almost the whole hole.
 #         Files are matched by NAME (sorted), never by glob order.
 #         Besides out_csv (one row per method), it writes per method <out_csv>_<method>_per_image.csv
 #         and <out_csv>_<method>.json: the JSON files are the input of evaluation/aggregate.py
@@ -31,6 +32,22 @@ from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 EXTS = (".png", ".jpg", ".jpeg")
 HOLE_THRESHOLD = 0.05          # without exact masks: a pixel is "corrupted" if input and ground truth differ by > 0.05
+WHITE_FILL = False             # True if the corruption is an opaque white fill (see estimate_hole)
+WHITE_LEVEL = 250              # a pixel is "white" if its three channels are >= WHITE_LEVEL (0-255)
+
+
+def estimate_hole(inp, gt):
+    """Corrupted region without exact masks (images float in [0, 255]): pixels where input and ground truth differ
+    by > HOLE_THRESHOLD. With WHITE_FILL, every white input pixel too: white paint on a bright region changes it by
+    less than the threshold. On simulated white-fill data this finds >= 99.5% of the corrupted pixels."""
+    hole = np.abs(inp - gt).max(axis=2) > HOLE_THRESHOLD * 255
+    if WHITE_FILL:
+        hole |= (inp >= WHITE_LEVEL).all(axis=2)
+    return hole
+
+
+def estimate_name():
+    return "estimated: |input - gt| > %.2f%s" % (HOLE_THRESHOLD, " or white input" if WHITE_FILL else "")
 
 
 def load_rgb(path, size=None):
@@ -58,15 +75,17 @@ def names_in(folder):
 @torch.no_grad()
 def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, device="cuda"):
     """test_root/{a,b}: clean / corrupted pairs with identical names (and optionally test_root/mask).
-    Writes out_root/{input,gt,wavtrgan} and, when test_root/mask exists, out_root/mask."""
+    Writes out_root/{input,gt,wavtrgan} and out_root/mask (the exact masks of test_root/mask) or, without them,
+    out_root/mask_estimated (estimate_hole): give these masks to the non-blind baselines."""
     corrupted_dir, clean_dir = (os.path.join(test_root, "b"), os.path.join(test_root, "a")) if direction == "b2a" \
         else (os.path.join(test_root, "a"), os.path.join(test_root, "b"))
     mask_src = os.path.join(test_root, "mask")
-    keys = ("input", "gt", "wavtrgan") + (("mask",) if os.path.isdir(mask_src) else ())
+    keys = ("input", "gt", "wavtrgan") + (("mask",) if os.path.isdir(mask_src) else ("mask_estimated",))
     dirs = {k: os.path.join(out_root, k) for k in keys}
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
     model = model.to(device).eval()
+    est_pixels = thr_pixels = all_pixels = 0
     for name in names_in(corrupted_dir):
         stem = os.path.splitext(name)[0] + ".png"
         inp = load_rgb(os.path.join(corrupted_dir, name), (size, size)) / 255.0
@@ -78,10 +97,21 @@ def generate_wavtrgan(model, test_root, out_root, direction="b2a", size=256, dev
         if "mask" in dirs:
             mask = load_mask(os.path.join(mask_src, stem), (size, size))
             Image.fromarray(mask.astype(np.uint8) * 255).save(os.path.join(dirs["mask"], stem))
+        else:   # the same estimate as evaluate() without mask_dir, on the saved 8-bit images
+            i8, g8 = (inp * 255).round(), (gt * 255).round()
+            mask = estimate_hole(i8, g8)
+            Image.fromarray(mask.astype(np.uint8) * 255).save(os.path.join(dirs["mask_estimated"], stem))
+            est_pixels += mask.sum()
+            thr_pixels += (np.abs(i8 - g8).max(axis=2) > HOLE_THRESHOLD * 255).sum()
+            all_pixels += mask.size
     print("saved", len(names_in(dirs["input"])), "pairs to", out_root)
     if "mask" not in dirs:
-        print("WARNING: %s has no mask/ folder, so hole metrics will use the threshold estimate. "
-              "Regenerate the test set with make_corrupted_dataset.py to get exact masks." % test_root)
+        print("%s has no mask/ folder: estimated masks (%s) saved to mask_estimated/, %.1f%% of the pixels "
+              "(the difference threshold alone: %.1f%%)" % (test_root, estimate_name(), 100 * est_pixels / all_pixels,
+                                                           100 * thr_pixels / all_pixels))
+        if not WHITE_FILL:
+            print("WARNING: the threshold misses corrupted pixels whose fill looks like the original. If the fill is "
+                  "white, set WHITE_FILL = True; otherwise rebuild the test set with exact masks (make_corrupted_dataset.py).")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -120,10 +150,9 @@ def evaluate(methods, gt_dir, input_dir, out_csv="metrics.csv", lpips_on=True, f
     mask_dir: exact masks (white = corrupted) with the same names; None = threshold estimate."""
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     gt_names = names_in(gt_dir)
-    mask_kind = "exact" if mask_dir else "threshold %.2f" % HOLE_THRESHOLD
+    mask_kind = "exact" if mask_dir else estimate_name()
     if not mask_dir:
-        print("WARNING: no mask_dir, the hole is estimated from |input - gt| > %.2f. "
-              "Use exact masks for the paper." % HOLE_THRESHOLD)
+        print("no mask_dir: hole %s" % mask_kind)
     lp = None
     if lpips_on:
         import lpips
@@ -147,7 +176,7 @@ def evaluate(methods, gt_dir, input_dir, out_csv="metrics.csv", lpips_on=True, f
             if mask_dir:
                 hole = load_mask(os.path.join(mask_dir, os.path.splitext(g)[0] + ".png"), size)
             else:
-                hole = np.abs(inp - gt).max(axis=2) > HOLE_THRESHOLD * 255
+                hole = estimate_hole(inp, gt)
             comp = np.where(hole[..., None], pr, inp)   # output inside the hole, uncorrupted input outside
             ssim_val, smap = structural_similarity(gt, pr, data_range=255, channel_axis=2, full=True)   # one SSIM pass
             r = {"image": os.path.splitext(g)[0], "bin": ratio_bin(hole.mean()), "mask_ratio": float(hole.mean()),
@@ -224,6 +253,7 @@ def sanity_check():
 # Example use (edit the paths)
 # ---------------------------------------------------------------------------------------------
 # sanity_check()
+# WHITE_FILL = True                                                               # white fill, no mask/ folder
 # generate_wavtrgan(model, "/kaggle/input/<dataset>/test", "eval_40_50")          # WavTRGAN outputs (+ mask/)
 # evaluate({"WavTRGAN": "eval_40_50/wavtrgan",
 #           "Blind-Omni-Wav-Net": "eval_40_50/omniwavnet",                         # same file names
