@@ -1,0 +1,15 @@
+# Fichiers de build
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+build/
+
+# Fichier de configuration Firebase (contient des clés — ne pas committer)
+app/google-services.json

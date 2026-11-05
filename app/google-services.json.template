@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "REMPLACER_PAR_VOTRE_PROJECT_NUMBER",
+    "project_id": "REMPLACER_PAR_VOTRE_PROJECT_ID",
+    "storage_bucket": "REMPLACER_PAR_VOTRE_PROJECT_ID.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "REMPLACER_PAR_VOTRE_APP_ID",
+        "android_client_info": {
+          "package_name": "com.etablissement.navette"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "REMPLACER_PAR_VOTRE_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
