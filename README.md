@@ -1,23 +1,29 @@
 # Navette Profs 🚍
 
-Application Android de **gestion de la navette des professeurs** d'un établissement.
+Application Android de **covoiturage / navette entre enseignants** d'un établissement.
 
-L'application indique **automatiquement** les professeurs attendus sur la navette,
-selon le **jour de la semaine** et l'**heure** actuelle :
+Chaque enseignant **crée son compte**, renseigne son **emploi du temps de navette**
+(matin et/ou soir, pour chaque jour) et indique s'il **possède une voiture**.
+L'application affiche ensuite **automatiquement** les enseignants attendus sur la
+navette en cours, en séparant **conducteurs** et **passagers**, afin de faciliter
+l'organisation du covoiturage. On peut **contacter** un enseignant en un geste
+(Appel, SMS ou WhatsApp).
+
+La navette courante est déterminée automatiquement selon le **jour** et l'**heure** :
 
 - Avant **12h00** → navette du **matin**
 - À partir de **12h00** → navette du **soir**
 
-L'administrateur gère la liste des professeurs et leur **planning hebdomadaire**
-(pour chaque jour : navette du matin et/ou du soir). Les données sont stockées
-et synchronisées via **Firebase Firestore**.
+(On peut aussi basculer manuellement matin/soir et consulter un autre jour.)
 
 ---
 
 ## 🧱 Technologies
 
 - **Kotlin** + **Jetpack Compose** (Material 3)
+- **Firebase Authentication** (e-mail + mot de passe)
 - **Firebase Firestore** (stockage cloud, temps réel)
+- Communication via **intents Android** (téléphone / SMS / WhatsApp)
 - Architecture **MVVM** (ViewModel + StateFlow + Repository)
 
 ## 📂 Structure
@@ -25,47 +31,52 @@ et synchronisées via **Firebase Firestore**.
 ```
 app/src/main/java/com/etablissement/navette/
 ├── NavetteApp.kt                 # Classe Application
-├── MainActivity.kt               # Navigation (2 onglets + écran d'édition)
+├── MainActivity.kt               # Porte d'authentification + navigation (2 onglets)
 ├── data/
-│   ├── model/Models.kt           # Teacher, Period (Matin/Soir), Weekday
-│   └── repository/TeacherRepository.kt   # Accès Firestore (temps réel)
+│   ├── model/Models.kt           # Teacher (nom, voiture, planning…), Period, Weekday
+│   └── repository/
+│       ├── AuthRepository.kt     # Connexion / inscription (Firebase Auth)
+│       └── TeacherRepository.kt  # Profils Firestore (teachers/{uid}, temps réel)
 ├── ui/
-│   ├── NavetteViewModel.kt       # Logique + état
+│   ├── NavetteViewModel.kt       # État auth + profil + navette
 │   ├── theme/Theme.kt
 │   └── screens/
-│       ├── HomeScreen.kt         # Navette en cours (automatique)
-│       ├── TeachersScreen.kt     # Liste + suppression
-│       ├── AddEditTeacherScreen.kt  # Formulaire + planning
+│       ├── LoginScreen.kt        # Connexion / création de compte
+│       ├── HomeScreen.kt         # Navette en cours : conducteurs / passagers + contact
+│       ├── ProfileScreen.kt      # Mon emploi du temps, ma voiture, déconnexion
 │       └── CommonComponents.kt
-└── util/ScheduleLogic.kt         # Détermination automatique matin/soir
+└── util/
+    ├── ScheduleLogic.kt          # Détermination automatique matin/soir
+    └── ContactActions.kt         # Appel / SMS / WhatsApp
 ```
 
 ## 🔥 Configuration Firebase (indispensable)
 
-L'application a besoin d'un projet Firebase. Suivez ces étapes :
-
 1. Créez un projet sur [Firebase Console](https://console.firebase.google.com/).
 2. Ajoutez une **application Android** avec le nom de package exact :
    **`com.etablissement.navette`**
-3. Téléchargez le fichier **`google-services.json`** généré par Firebase.
-4. Placez-le dans le dossier **`app/`** (soit `app/google-services.json`).
+3. Téléchargez le fichier **`google-services.json`** et placez-le dans **`app/`**.
    - Un modèle `app/google-services.json.template` est fourni comme référence.
-5. Dans la console Firebase, ouvrez **Firestore Database** → **Créer une base de données**.
-6. Pendant le développement, vous pouvez démarrer en **mode test** (règles ouvertes).
-   Pour la production, sécurisez l'accès (voir ci-dessous).
+4. **Authentication** → activez le fournisseur **E-mail/Mot de passe**.
+5. **Firestore Database** → créez la base de données.
 
-> ⚠️ Le fichier `app/google-services.json` est volontairement ignoré par git
-> (voir `.gitignore`) car il contient des identifiants propres à votre projet.
+> ⚠️ `app/google-services.json` est volontairement ignoré par git (`.gitignore`)
+> car il contient des identifiants propres à votre projet.
 
-### Exemple de règles Firestore (production minimale)
+### Règles de sécurité Firestore recommandées
+
+Chaque enseignant ne peut modifier **que son propre profil** ; tous les
+enseignants connectés peuvent **lire** la liste (pour voir la navette).
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /teachers/{doc} {
-      // À restreindre selon votre authentification (admin uniquement)
-      allow read, write: if true;
+    match /teachers/{uid} {
+      // Lecture : tout utilisateur connecté
+      allow read: if request.auth != null;
+      // Écriture : uniquement sur son propre document
+      allow write: if request.auth != null && request.auth.uid == uid;
     }
   }
 }
@@ -73,12 +84,12 @@ service cloud.firestore {
 
 ## ▶️ Compilation & exécution
 
-1. Ouvrez le projet dans **Android Studio** (version récente, Giraffe ou plus).
-2. Laissez Android Studio synchroniser Gradle et générer le wrapper si besoin.
-3. Assurez-vous que `app/google-services.json` est présent.
-4. Lancez l'application sur un émulateur ou un appareil (Android 8.0 / API 26 minimum).
+1. Ouvrez le projet dans **Android Studio** (Giraffe ou plus récent).
+2. Laissez Gradle se synchroniser.
+3. Vérifiez que `app/google-services.json` est présent.
+4. Lancez sur un appareil / émulateur (Android 8.0 / API 26 minimum).
 
-En ligne de commande (si le wrapper Gradle est présent) :
+En ligne de commande :
 
 ```bash
 ./gradlew assembleDebug
@@ -86,13 +97,15 @@ En ligne de commande (si le wrapper Gradle est présent) :
 
 ## 🧩 Modèle de données Firestore
 
-Collection **`teachers`**, un document par professeur :
+Collection **`teachers`**, un document par enseignant, **identifié par son UID** :
 
 ```json
 {
   "name": "Mme Benali",
   "subject": "Mathématiques",
-  "phone": "0612345678",
+  "phone": "+2126XXXXXXXX",
+  "email": "benali@exemple.ma",
+  "hasCar": true,
   "schedule": {
     "MONDAY":  ["MORNING"],
     "TUESDAY": ["MORNING", "EVENING"],
@@ -101,13 +114,19 @@ Collection **`teachers`**, un document par professeur :
 }
 ```
 
-- `schedule` : pour chaque jour (`MONDAY` … `SUNDAY`), la liste des périodes
-  (`MORNING`, `EVENING`) où le professeur prend la navette.
+- `hasCar` : `true` si l'enseignant a une voiture (conducteur potentiel).
+- `schedule` : pour chaque jour (`MONDAY` … `SUNDAY`), les périodes
+  (`MORNING`, `EVENING`) où il prend la navette.
 
 ## 💡 Utilisation
 
-- **Onglet « Navette »** : affiche automatiquement les profs de la navette en cours
-  (jour + matin/soir selon l'heure). Boutons pour basculer manuellement matin/soir
-  ou consulter un autre jour. Bouton ↻ pour revenir à « maintenant ».
-- **Onglet « Professeurs »** : ajouter (＋), modifier ou supprimer un professeur
-  et définir son planning hebdomadaire.
+1. **Connexion / inscription** avec une adresse e-mail.
+2. **Onglet « Mon profil »** : renseigner son nom, sa matière, son **téléphone**
+   (idéalement au format international pour WhatsApp, ex. `+2126…`), cocher s'il a
+   une **voiture**, et définir son **emploi du temps de navette**.
+3. **Onglet « Navette »** : voir automatiquement, pour la navette en cours, les
+   **conducteurs** (avec voiture) et les **passagers** (sans voiture). Boutons
+   **📞 Appeler**, **💬 SMS**, **WhatsApp** pour se contacter et organiser le trajet.
+
+> 💡 Pour que **WhatsApp** fonctionne de façon fiable, saisissez le numéro au
+> format international sans espaces (ex. `+212612345678`).

@@ -12,6 +12,9 @@ import kotlinx.coroutines.tasks.await
 
 /**
  * Accès aux données des professeurs stockées dans Firestore (collection "teachers").
+ *
+ * Chaque enseignant possède un document dont l'identifiant est son UID Firebase Auth.
+ * Il ne peut modifier que son propre document (voir les règles Firestore du README).
  */
 class TeacherRepository(
     private val db: FirebaseFirestore = Firebase.firestore
@@ -19,8 +22,7 @@ class TeacherRepository(
     private val collection get() = db.collection(COLLECTION)
 
     /**
-     * Flux temps réel de la liste des professeurs, triée par nom.
-     * Émet une nouvelle liste à chaque modification côté Firestore.
+     * Flux temps réel de la liste de tous les professeurs, triée par nom.
      */
     fun observeTeachers(): Flow<List<Teacher>> = callbackFlow {
         val registration = collection
@@ -38,28 +40,35 @@ class TeacherRepository(
         awaitClose { registration.remove() }
     }
 
-    /** Crée ou met à jour un professeur. Retourne l'id du document. */
-    suspend fun save(teacher: Teacher): String {
-        return if (teacher.id.isBlank()) {
-            val ref = collection.add(teacher.toMap()).await()
-            ref.id
-        } else {
-            collection.document(teacher.id).set(teacher.toMap()).await()
-            teacher.id
-        }
+    /**
+     * Flux temps réel du profil de l'enseignant courant (document teachers/{uid}).
+     * Émet null tant qu'aucun profil n'a été créé.
+     */
+    fun observeMyProfile(uid: String): Flow<Teacher?> = callbackFlow {
+        val registration = collection.document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.toObject(Teacher::class.java))
+            }
+        awaitClose { registration.remove() }
     }
 
-    /** Supprime un professeur. */
-    suspend fun delete(teacherId: String) {
-        if (teacherId.isNotBlank()) {
-            collection.document(teacherId).delete().await()
-        }
+    /**
+     * Crée ou met à jour le profil de l'enseignant [uid].
+     */
+    suspend fun saveProfile(uid: String, teacher: Teacher) {
+        collection.document(uid).set(teacher.toMap()).await()
     }
 
     private fun Teacher.toMap(): Map<String, Any> = mapOf(
         "name" to name,
         "subject" to subject,
         "phone" to phone,
+        "email" to email,
+        "hasCar" to hasCar,
         "schedule" to schedule
     )
 
