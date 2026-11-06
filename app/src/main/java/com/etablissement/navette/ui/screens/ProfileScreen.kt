@@ -1,6 +1,7 @@
 package com.etablissement.navette.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,16 +14,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -217,42 +219,47 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     }
 }
 
-/** Menu déroulant pour choisir la matière enseignée. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Menu déroulant pour choisir la matière enseignée.
+ * Utilise un DropdownMenu standard (API stable, sans dépendance expérimentale).
+ */
 @Composable
 private fun SubjectDropdown(
     selected: String,
     onSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        OutlinedTextField(
-            value = selected,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Matière") },
-            placeholder = { Text("Choisir une matière") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Matière",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            Subjects.ALL.forEach { subject ->
-                DropdownMenuItem(
-                    text = { Text(subject) },
-                    onClick = {
-                        onSelected(subject)
-                        expanded = false
-                    }
+        Spacer(Modifier.height(4.dp))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = selected.ifBlank { "Choisir une matière" },
+                    modifier = Modifier.weight(1f)
                 )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                Subjects.ALL.forEach { subject ->
+                    DropdownMenuItem(
+                        text = { Text(subject) },
+                        onClick = {
+                            onSelected(subject)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
     }
