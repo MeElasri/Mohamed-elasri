@@ -3,6 +3,25 @@ package com.etablissement.navette.data.model
 import com.google.firebase.firestore.DocumentId
 
 /**
+ * Liste des matières proposées dans le formulaire de profil.
+ */
+object Subjects {
+    val ALL: List<String> = listOf(
+        "Informatique",
+        "Mathématiques",
+        "SVT",
+        "Physique-Chimie",
+        "Éducation islamique",
+        "Histoire-Géographie",
+        "Arabe",
+        "Français",
+        "Philosophie",
+        "Anglais",
+        "Éducation sportive (EPS)"
+    )
+}
+
+/**
  * Période de la journée pour la navette.
  */
 enum class Period(val label: String) {

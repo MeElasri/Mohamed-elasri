@@ -15,7 +15,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenu
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +46,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.etablissement.navette.data.model.Period
+import com.etablissement.navette.data.model.Subjects
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
@@ -153,12 +158,9 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            OutlinedTextField(
-                value = subject,
-                onValueChange = { subject = it },
-                label = { Text("Matière (optionnel)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+            SubjectDropdown(
+                selected = subject,
+                onSelected = { subject = it }
             )
 
             OutlinedTextField(
@@ -212,6 +214,47 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** Menu déroulant pour choisir la matière enseignée. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubjectDropdown(
+    selected: String,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Matière") },
+            placeholder = { Text("Choisir une matière") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            Subjects.ALL.forEach { subject ->
+                DropdownMenuItem(
+                    text = { Text(subject) },
+                    onClick = {
+                        onSelected(subject)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }
