@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +63,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     var subject by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var hasCar by remember { mutableStateOf(false) }
+    var available by remember { mutableStateOf(true) }
     var nameError by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
 
@@ -75,6 +77,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
             subject = p.subject
             phone = p.phone
             hasCar = p.hasCar
+            available = p.available
             selected.clear()
             Weekday.entries.forEach { day ->
                 Period.entries.forEach { period ->
@@ -110,6 +113,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 phone = phone.trim(),
                 email = viewModel.currentEmail ?: "",
                 hasCar = hasCar,
+                available = available,
                 schedule = buildSchedule()
             )
         )
@@ -189,6 +193,25 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                     )
                 }
                 Switch(checked = hasCar, onCheckedChange = { hasCar = it })
+            }
+
+            // Disponibilité pour la navette (disponible par défaut)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.EventAvailable, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Disponible pour la navette", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = if (available) "Vous apparaissez comme disponible"
+                        else "Vous apparaissez comme indisponible",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = available, onCheckedChange = { available = it })
             }
 
             Spacer(Modifier.height(4.dp))

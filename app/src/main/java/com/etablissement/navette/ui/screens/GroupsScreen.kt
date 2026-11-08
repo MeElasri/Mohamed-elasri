@@ -178,7 +178,8 @@ private fun GroupCard(
                 name = driver?.name ?: group.driverName,
                 subtitle = driver?.subject.orEmpty(),
                 phone = driver?.phone.orEmpty(),
-                isDriver = true
+                isDriver = true,
+                available = driver?.available ?: true
             )
 
             if (members.isNotEmpty()) {
@@ -193,7 +194,8 @@ private fun GroupCard(
                         name = member.name,
                         subtitle = member.subject,
                         phone = member.phone,
-                        isDriver = false
+                        isDriver = false,
+                        available = member.available
                     )
                 }
             }
@@ -206,7 +208,8 @@ private fun PersonRow(
     name: String,
     subtitle: String,
     phone: String,
-    isDriver: Boolean
+    isDriver: Boolean,
+    available: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -230,6 +233,14 @@ private fun PersonRow(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!available) {
+                Text(
+                    text = "● Indisponible",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.error
                 )
             }
         }

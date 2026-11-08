@@ -237,6 +237,13 @@ private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Text(
+                    text = if (teacher.available) "● Disponible" else "● Indisponible",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (teacher.available) Color(0xFF2E7D32)
+                    else MaterialTheme.colorScheme.error
+                )
             }
 
             // Actions de communication (Appeler / SMS / WhatsApp)

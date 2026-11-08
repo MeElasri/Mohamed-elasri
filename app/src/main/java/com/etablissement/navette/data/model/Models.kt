@@ -104,6 +104,8 @@ data class Teacher(
     val email: String = "",
     /** true si l'enseignant possède une voiture (conducteur potentiel). */
     val hasCar: Boolean = false,
+    /** true si l'enseignant est disponible pour la navette (disponible par défaut). */
+    val available: Boolean = true,
     val schedule: Map<String, List<String>> = emptyMap()
 ) {
     /** Indique si le prof prend la navette le [day] pour la [period] donnée. */
