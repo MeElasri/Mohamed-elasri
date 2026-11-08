@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,9 +57,12 @@ fun HomeScreen(viewModel: NavetteViewModel) {
     val teachers by viewModel.teachers.collectAsStateWithLifecycle()
     val homeState by viewModel.homeState.collectAsStateWithLifecycle()
 
-    val onNavette = viewModel.teachersOnNavette(teachers, homeState.day, homeState.period)
-    val drivers = onNavette.filter { it.hasCar }
-    val passengers = onNavette.filter { !it.hasCar }
+    // Calculs mis en cache : recalculés seulement si la liste, le jour ou la période change.
+    val onNavette = remember(teachers, homeState.day, homeState.period) {
+        viewModel.teachersOnNavette(teachers, homeState.day, homeState.period)
+    }
+    val drivers = remember(onNavette) { onNavette.filter { it.hasCar } }
+    val passengers = remember(onNavette) { onNavette.filterNot { it.hasCar } }
 
     Scaffold(
         topBar = {
