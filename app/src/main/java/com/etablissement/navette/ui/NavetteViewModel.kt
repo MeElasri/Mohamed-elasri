@@ -2,10 +2,12 @@ package com.etablissement.navette.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.etablissement.navette.data.model.Group
 import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.data.repository.AuthRepository
+import com.etablissement.navette.data.repository.GroupRepository
 import com.etablissement.navette.data.repository.TeacherRepository
 import com.etablissement.navette.util.ScheduleLogic
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,11 +40,14 @@ data class HomeUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class NavetteViewModel(
     private val authRepository: AuthRepository,
-    private val teacherRepository: TeacherRepository
+    private val teacherRepository: TeacherRepository,
+    private val groupRepository: GroupRepository
 ) : ViewModel() {
 
     // Constructeur sans argument requis par la fabrique par défaut de viewModel().
-    constructor() : this(AuthRepository(), TeacherRepository())
+    constructor() : this(AuthRepository(), TeacherRepository(), GroupRepository())
+
+    val currentUid: String? get() = authRepository.currentUid
 
     /** État d'authentification observé en temps réel. */
     val authState: StateFlow<AuthState> = authRepository.authStateFlow()
@@ -55,6 +60,15 @@ class NavetteViewModel(
 
     /** Liste de tous les enseignants, synchronisée en temps réel. */
     val teachers: StateFlow<List<Teacher>> = teacherRepository.observeTeachers()
+        .catch { error -> _errorMessage.value = error.message }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    /** Liste de tous les groupes de navette, synchronisée en temps réel. */
+    val groups: StateFlow<List<Group>> = groupRepository.observeGroups()
         .catch { error -> _errorMessage.value = error.message }
         .stateIn(
             scope = viewModelScope,
@@ -143,6 +157,38 @@ class NavetteViewModel(
                 teacherRepository.saveProfile(uid, teacher)
             } catch (e: Exception) {
                 _errorMessage.value = "Échec de l'enregistrement : ${e.message}"
+            }
+        }
+    }
+
+    // --- Groupes de navette ---
+
+    /** Groupe par son id (depuis la liste en mémoire). */
+    fun groupById(id: String?): Group? =
+        if (id.isNullOrBlank()) null else groups.value.firstOrNull { it.id == id }
+
+    /** Enseignants correspondant à une liste d'UID (pour l'affichage / le contact). */
+    fun teachersByIds(ids: List<String>): List<Teacher> {
+        val all = teachers.value
+        return ids.mapNotNull { id -> all.firstOrNull { it.id == id } }
+    }
+
+    fun saveGroup(group: Group) {
+        viewModelScope.launch {
+            try {
+                groupRepository.save(group)
+            } catch (e: Exception) {
+                _errorMessage.value = "Échec de l'enregistrement du groupe : ${e.message}"
+            }
+        }
+    }
+
+    fun deleteGroup(groupId: String) {
+        viewModelScope.launch {
+            try {
+                groupRepository.delete(groupId)
+            } catch (e: Exception) {
+                _errorMessage.value = "Échec de la suppression : ${e.message}"
             }
         }
     }

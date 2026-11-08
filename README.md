@@ -78,9 +78,24 @@ service cloud.firestore {
       // Écriture : uniquement sur son propre document
       allow write: if request.auth != null && request.auth.uid == uid;
     }
+
+    match /groups/{groupId} {
+      // Lecture : tout utilisateur connecté
+      allow read: if request.auth != null;
+      // Création : seulement si on se désigne soi-même comme conducteur
+      allow create: if request.auth != null
+                    && request.resource.data.driverId == request.auth.uid;
+      // Modification / suppression : uniquement le conducteur créateur
+      allow update, delete: if request.auth != null
+                            && resource.data.driverId == request.auth.uid;
+    }
   }
 }
 ```
+
+> 💡 La création de groupe est aussi limitée **côté app** aux enseignants ayant
+> une voiture ; la règle ci-dessus garantit en plus qu'on ne peut pas créer un
+> groupe au nom de quelqu'un d'autre.
 
 ## ▶️ Compilation & exécution
 

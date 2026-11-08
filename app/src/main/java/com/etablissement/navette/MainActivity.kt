@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsBus
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -36,8 +37,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import com.etablissement.navette.ui.AuthState
 import com.etablissement.navette.ui.NavetteViewModel
+import com.etablissement.navette.ui.screens.CreateEditGroupScreen
+import com.etablissement.navette.ui.screens.GroupsScreen
 import com.etablissement.navette.ui.screens.HomeScreen
 import com.etablissement.navette.ui.screens.LoginScreen
 import com.etablissement.navette.ui.screens.ProfileScreen
@@ -60,6 +65,12 @@ class MainActivity : ComponentActivity() {
 private object Routes {
     const val HOME = "home"
     const val PROFILE = "profile"
+    const val GROUPS = "groups"
+    const val GROUP_EDIT_ARG = "groupEdit?groupId={groupId}"
+    fun groupEdit(groupId: String? = null) =
+        if (groupId == null) "groupEdit" else "groupEdit?groupId=$groupId"
+
+    val bottomRoutes = listOf(HOME, PROFILE, GROUPS)
 }
 
 @Composable
@@ -101,6 +112,7 @@ private fun MainApp(viewModel: NavetteViewModel) {
 
     val bottomItems = listOf(
         Triple(Routes.HOME, "Navette", Icons.Filled.DirectionsBus),
+        Triple(Routes.GROUPS, "Groupes", Icons.Filled.Groups),
         Triple(Routes.PROFILE, "Mon profil", Icons.Filled.Person)
     )
 
@@ -108,7 +120,9 @@ private fun MainApp(viewModel: NavetteViewModel) {
         bottomBar = {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
-            NavigationBar {
+            // Masque la barre d'onglets sur l'écran de création/édition de groupe.
+            val showBar = currentDestination?.route?.let { it in Routes.bottomRoutes } ?: false
+            if (showBar) NavigationBar {
                 bottomItems.forEach { (route, label, icon) ->
                     val selected = currentDestination?.hierarchy?.any { it.route == route } == true
                     NavigationBarItem(
@@ -140,7 +154,30 @@ private fun MainApp(viewModel: NavetteViewModel) {
             popExitTransition = { fadeOut(tween(150)) }
         ) {
             composable(Routes.HOME) { HomeScreen(viewModel = viewModel) }
+            composable(Routes.GROUPS) {
+                GroupsScreen(
+                    viewModel = viewModel,
+                    onCreateGroup = { navController.navigate(Routes.groupEdit()) },
+                    onEditGroup = { id -> navController.navigate(Routes.groupEdit(id)) }
+                )
+            }
             composable(Routes.PROFILE) { ProfileScreen(viewModel = viewModel) }
+            composable(
+                route = Routes.GROUP_EDIT_ARG,
+                arguments = listOf(
+                    navArgument("groupId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                CreateEditGroupScreen(
+                    viewModel = viewModel,
+                    groupId = backStackEntry.arguments?.getString("groupId"),
+                    onDone = { navController.popBackStack() }
+                )
+            }
         }
     }
 }

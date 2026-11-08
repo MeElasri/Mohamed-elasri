@@ -205,7 +205,6 @@ private fun SectionHeader(icon: ImageVector, title: String, count: Int) {
 
 @Composable
 private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean) {
-    val context = LocalContext.current
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -240,28 +239,8 @@ private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean) {
                 }
             }
 
-            // Actions de communication
-            FilledTonalIconButton(onClick = { ContactActions.call(context, teacher.phone) }) {
-                Icon(Icons.Filled.Call, contentDescription = "Appeler")
-            }
-            Spacer(Modifier.width(4.dp))
-            FilledTonalIconButton(onClick = { ContactActions.sms(context, teacher.phone) }) {
-                Icon(Icons.Filled.Sms, contentDescription = "SMS")
-            }
-            Spacer(Modifier.width(4.dp))
-            FilledTonalIconButton(
-                onClick = { ContactActions.whatsapp(context, teacher.phone) },
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = Color(0xFF25D366),
-                    contentColor = Color.White
-                )
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_whatsapp),
-                    contentDescription = "WhatsApp",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            // Actions de communication (Appeler / SMS / WhatsApp)
+            ContactButtons(phone = teacher.phone)
         }
     }
 }

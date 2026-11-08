@@ -53,6 +53,39 @@ enum class Weekday(val label: String) {
 }
 
 /**
+ * Période couverte par un groupe de navette.
+ */
+enum class GroupPeriod(val label: String) {
+    MORNING("Matin"),
+    EVENING("Soir"),
+    BOTH("Matin et soir");
+
+    companion object {
+        fun fromName(name: String?): GroupPeriod = entries.firstOrNull { it.name == name } ?: BOTH
+    }
+}
+
+/**
+ * Groupe de navette (covoiturage) créé par un conducteur (enseignant ayant une voiture).
+ *
+ * - [driverId] : UID du conducteur créateur (seul à pouvoir modifier/supprimer le groupe).
+ * - [memberIds] : UID des enseignants membres (passagers). Le conducteur n'y figure pas.
+ * - [period] : nom d'une valeur de [GroupPeriod].
+ *
+ * Les noms/téléphones ne sont pas stockés ici : ils sont résolus depuis la liste
+ * des enseignants (toujours à jour).
+ */
+data class Group(
+    @DocumentId
+    val id: String = "",
+    val name: String = "",
+    val driverId: String = "",
+    val driverName: String = "",
+    val period: String = GroupPeriod.BOTH.name,
+    val memberIds: List<String> = emptyList()
+)
+
+/**
  * Modèle d'un professeur et de son planning de navette.
  *
  * Le planning est stocké sous forme de Map : clé = nom du jour (Weekday.name),
