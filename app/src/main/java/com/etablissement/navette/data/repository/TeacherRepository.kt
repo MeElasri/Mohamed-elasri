@@ -70,6 +70,7 @@ class TeacherRepository(
         "email" to email,
         "hasCar" to hasCar,
         "available" to available,
+        "unavailableDays" to unavailableDays,
         "schedule" to schedule
     )
 

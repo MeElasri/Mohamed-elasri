@@ -114,8 +114,17 @@ data class Teacher(
     val hasCar: Boolean = false,
     /** true si l'enseignant est disponible pour la navette (disponible par défaut). */
     val available: Boolean = true,
+    /**
+     * Jours (Weekday.name) où l'enseignant est indisponible.
+     * Liste vide = disponible tous les jours (valeur par défaut).
+     */
+    val unavailableDays: List<String> = emptyList(),
     val schedule: Map<String, List<String>> = emptyMap()
 ) {
+    /** Indique si l'enseignant est disponible le [day] donné. */
+    fun isAvailableOn(day: Weekday): Boolean =
+        available && !unavailableDays.contains(day.name)
+
     /** Indique si le prof prend la navette le [day] pour la [period] donnée. */
     fun isScheduled(day: Weekday, period: Period): Boolean =
         schedule[day.name]?.contains(period.name) == true

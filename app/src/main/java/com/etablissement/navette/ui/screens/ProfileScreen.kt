@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,7 +64,8 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     var subject by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var hasCar by remember { mutableStateOf(false) }
-    var available by remember { mutableStateOf(true) }
+    // Jours d'absence (vide = disponible tous les jours).
+    val absentDays = remember { mutableStateListOf<Weekday>() }
     var nameError by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
 
@@ -77,7 +79,9 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
             subject = p.subject
             phone = p.phone
             hasCar = p.hasCar
-            available = p.available
+            absentDays.clear()
+            // Ancien réglage global « indisponible » = absent tous les jours.
+            absentDays.addAll(Weekday.entries.filter { !p.isAvailableOn(it) })
             selected.clear()
             Weekday.entries.forEach { day ->
                 Period.entries.forEach { period ->
@@ -113,7 +117,8 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 phone = phone.trim(),
                 email = viewModel.currentEmail ?: "",
                 hasCar = hasCar,
-                available = available,
+                available = true,
+                unavailableDays = absentDays.map { it.name },
                 schedule = buildSchedule()
             )
         )
@@ -195,7 +200,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 Switch(checked = hasCar, onCheckedChange = { hasCar = it })
             }
 
-            // Disponibilité pour la navette (disponible par défaut)
+            // Disponibilité jour par jour (disponible tous les jours par défaut)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -203,16 +208,29 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 Icon(Icons.Filled.EventAvailable, contentDescription = null)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Disponible pour la navette", style = MaterialTheme.typography.bodyLarge)
+                    Text("Mes jours d'absence", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        text = if (available) "Vous apparaissez comme disponible"
-                        else "Vous apparaissez comme indisponible",
+                        text = if (absentDays.isEmpty()) "Disponible tous les jours"
+                        else "Absent : " + Weekday.entries.filter { it in absentDays }
+                            .joinToString(", ") { it.label },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(checked = available, onCheckedChange = { available = it })
             }
+            Text(
+                text = "Touchez les jours où vous n'êtes pas disponible : votre place sera proposée aux autres.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            LazyRowChips(
+                items = Weekday.entries,
+                isSelected = { it in absentDays },
+                label = { it.label.take(3) },
+                onClick = { day ->
+                    if (day in absentDays) absentDays.remove(day) else absentDays.add(day)
+                }
+            )
 
             Spacer(Modifier.height(4.dp))
 

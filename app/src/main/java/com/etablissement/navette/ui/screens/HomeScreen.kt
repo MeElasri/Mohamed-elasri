@@ -160,7 +160,9 @@ fun HomeScreen(viewModel: NavetteViewModel) {
                                 count = drivers.size
                             )
                         }
-                        items(drivers, key = { it.id }) { TeacherNavetteCard(it, isDriver = true) }
+                        items(drivers, key = { it.id }) {
+                            TeacherNavetteCard(it, isDriver = true, available = it.isAvailableOn(homeState.day))
+                        }
                     }
                     if (passengers.isNotEmpty()) {
                         item {
@@ -170,7 +172,9 @@ fun HomeScreen(viewModel: NavetteViewModel) {
                                 count = passengers.size
                             )
                         }
-                        items(passengers, key = { it.id }) { TeacherNavetteCard(it, isDriver = false) }
+                        items(passengers, key = { it.id }) {
+                            TeacherNavetteCard(it, isDriver = false, available = it.isAvailableOn(homeState.day))
+                        }
                     }
                 }
             }
@@ -204,7 +208,7 @@ private fun SectionHeader(icon: ImageVector, title: String, count: Int) {
 }
 
 @Composable
-private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean) {
+private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean, available: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -238,10 +242,10 @@ private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean) {
                     )
                 }
                 Text(
-                    text = if (teacher.available) "● Disponible" else "● Indisponible",
+                    text = if (available) "● Disponible" else "● Indisponible ce jour",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (teacher.available) Color(0xFF2E7D32)
+                    color = if (available) Color(0xFF2E7D32)
                     else MaterialTheme.colorScheme.error
                 )
             }

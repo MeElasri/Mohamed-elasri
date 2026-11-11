@@ -43,7 +43,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.etablissement.navette.data.model.Group
 import com.etablissement.navette.data.model.GroupPeriod
 import com.etablissement.navette.data.model.Teacher
+import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
+import com.etablissement.navette.util.ScheduleLogic
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +61,8 @@ fun GroupsScreen(
     val canCreate = myProfile?.hasCar == true
 
     var groupToDelete by remember { mutableStateOf<Group?>(null) }
+    // Jour pour lequel on affiche les places (aujourd'hui par défaut).
+    var day by remember { mutableStateOf(ScheduleLogic.currentDay()) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Groupes de navette") }) },
@@ -93,6 +97,20 @@ fun GroupsScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
+            Text(
+                text = "Places disponibles pour : ${day.label}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            LazyRowChips(
+                items = Weekday.entries,
+                isSelected = { it == day },
+                label = { it.label.take(3) },
+                onClick = { day = it }
+            )
+            Spacer(Modifier.height(12.dp))
+
             if (groups.isEmpty()) {
                 EmptyState(
                     message = "Aucun groupe de navette pour le moment.\n" +
@@ -107,6 +125,7 @@ fun GroupsScreen(
                             driver = teachers.firstOrNull { it.id == group.driverId },
                             members = viewModel.teachersByIds(group.memberIds),
                             isMine = group.driverId == myUid,
+                            day = day,
                             onEdit = { onEditGroup(group.id) },
                             onDelete = { groupToDelete = group }
                         )
@@ -140,6 +159,7 @@ private fun GroupCard(
     driver: Teacher?,
     members: List<Teacher>,
     isMine: Boolean,
+    day: Weekday,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -168,16 +188,16 @@ private fun GroupCard(
             )
 
             // Places : 5 au total (conducteur compris). Un membre indisponible libère sa place.
-            val driverAvailable = driver?.available ?: true
+            val driverAvailable = driver?.isAvailableOn(day) ?: true
             val unresolved = group.memberIds.size - members.size
-            val occupied = 1 + members.count { it.available } + unresolved
+            val occupied = 1 + members.count { it.isAvailableOn(day) } + unresolved
             val freeSeats = (Group.CAPACITY - occupied).coerceAtLeast(0)
-            val absentCount = members.count { !it.available }
+            val absentCount = members.count { !it.isAvailableOn(day) }
 
             Spacer(Modifier.height(8.dp))
             val (seatText, seatColor) = when {
                 !driverAvailable ->
-                    "Conducteur indisponible : pas de navette pour ce groupe" to
+                    "Conducteur indisponible ${day.label.lowercase()} : pas de navette pour ce groupe" to
                         MaterialTheme.colorScheme.error
                 freeSeats > 0 ->
                     ("$freeSeats place${if (freeSeats > 1) "s" else ""} disponible" +
@@ -207,7 +227,7 @@ private fun GroupCard(
                 subtitle = driver?.subject.orEmpty(),
                 phone = driver?.phone.orEmpty(),
                 isDriver = true,
-                available = driver?.available ?: true
+                available = driver?.isAvailableOn(day) ?: true
             )
 
             if (members.isNotEmpty()) {
@@ -223,7 +243,7 @@ private fun GroupCard(
                         subtitle = member.subject,
                         phone = member.phone,
                         isDriver = false,
-                        available = member.available
+                        available = member.isAvailableOn(day)
                     )
                 }
             }
