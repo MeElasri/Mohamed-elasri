@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -164,6 +165,33 @@ private fun GroupCard(
                 text = "Navette : ${GroupPeriod.fromName(group.period).label}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // Places : 5 au total (conducteur compris). Un membre indisponible libère sa place.
+            val driverAvailable = driver?.available ?: true
+            val unresolved = group.memberIds.size - members.size
+            val occupied = 1 + members.count { it.available } + unresolved
+            val freeSeats = (Group.CAPACITY - occupied).coerceAtLeast(0)
+            val absentCount = members.count { !it.available }
+
+            Spacer(Modifier.height(8.dp))
+            val (seatText, seatColor) = when {
+                !driverAvailable ->
+                    "Conducteur indisponible : pas de navette pour ce groupe" to
+                        MaterialTheme.colorScheme.error
+                freeSeats > 0 ->
+                    ("$freeSeats place${if (freeSeats > 1) "s" else ""} disponible" +
+                        (if (freeSeats > 1) "s" else "") +
+                        (if (absentCount > 0) " ($absentCount absent${if (absentCount > 1) "s" else ""})" else "") +
+                        " — contactez le conducteur") to Color(0xFF2E7D32)
+                else -> "Complet ($occupied/${Group.CAPACITY})" to
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(
+                text = seatText,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = seatColor
             )
 
             Spacer(Modifier.height(12.dp))

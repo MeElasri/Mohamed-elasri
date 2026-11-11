@@ -67,8 +67,15 @@ fun CreateEditGroupScreen(
     }
 
     fun toggleMember(id: String) {
-        if (selectedMemberIds.contains(id)) selectedMemberIds.remove(id)
-        else selectedMemberIds.add(id)
+        when {
+            selectedMemberIds.contains(id) -> selectedMemberIds.remove(id)
+            selectedMemberIds.size >= Group.MAX_MEMBERS -> Toast.makeText(
+                context,
+                "Maximum ${Group.MAX_MEMBERS} passagers (${Group.CAPACITY} places avec le conducteur)",
+                Toast.LENGTH_SHORT
+            ).show()
+            else -> selectedMemberIds.add(id)
+        }
     }
 
     fun save() {
@@ -157,7 +164,7 @@ fun CreateEditGroupScreen(
             }
 
             Text(
-                text = "Membres (passagers)",
+                text = "Membres (passagers) : ${selectedMemberIds.size}/${Group.MAX_MEMBERS}",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold
             )
@@ -185,7 +192,8 @@ fun CreateEditGroupScreen(
                     ) {
                         Checkbox(
                             checked = checked,
-                            onCheckedChange = { toggleMember(teacher.id) }
+                            onCheckedChange = { toggleMember(teacher.id) },
+                            enabled = checked || selectedMemberIds.size < Group.MAX_MEMBERS
                         )
                         Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {

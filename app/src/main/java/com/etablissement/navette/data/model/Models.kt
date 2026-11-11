@@ -83,7 +83,15 @@ data class Group(
     val driverName: String = "",
     val period: String = GroupPeriod.BOTH.name,
     val memberIds: List<String> = emptyList()
-)
+) {
+    companion object {
+        /** Nombre total de places dans la voiture, conducteur compris. */
+        const val CAPACITY = 5
+
+        /** Nombre maximum de passagers (hors conducteur). */
+        const val MAX_MEMBERS = CAPACITY - 1
+    }
+}
 
 /**
  * Modèle d'un professeur et de son planning de navette.
