@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// Présence Classe — Firestore security rules
+// - Nobody can sign up and read data: an account needs a users/{uid} profile created by the administration.
+// - A teacher only sees the classes the administration assigned to them (users/{uid}.classIds).
+// - A teacher can only create/modify/delete their own roll calls.
+// - The administration (role "admin") manages classes, students, teachers and can read/correct everything.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function profilePath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    function hasProfile() {
+      return signedIn() && exists(profilePath());
+    }
+    function me() {
+      return get(profilePath()).data;
+    }
+    function isActive() {
+      return hasProfile() && me().get('active', true) == true;
+    }
+    function isAdmin() {
+      return isActive() && me().role == 'admin';
+    }
+    function teaches(classId) {
+      return isActive() && classId in me().get('classIds', []);
+    }
+
+    // ---------- Accounts ----------
+    match /users/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ---------- Classes & students ----------
+    match /classes/{classId} {
+      allow read: if isAdmin() || teaches(classId);
+      allow write: if isAdmin();
+
+      match /students/{studentId} {
+        allow read: if isAdmin() || teaches(classId);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ---------- Roll calls ----------
+    match /sessions/{sessionId} {
+      function validSession(d) {
+        return d.classId is string
+          && d.epochDay is int
+          && d.teacherUid is string
+          && d.marks is map
+          && d.nonPresent is list;
+      }
+
+      allow read: if isAdmin()
+        || teaches(resource.data.classId)
+        || (isActive() && resource.data.teacherUid == request.auth.uid);
+
+      // Teachers may only write the app's fields, with the real class name (it appears in reports).
+      function teacherFieldsOk(d) {
+        return d.keys().hasOnly(['classId', 'className', 'epochDay', 'date', 'period',
+                                 'teacherUid', 'teacherName', 'marks', 'nonPresent',
+                                 'present', 'total', 'clientUpdatedAt', 'clientCreatedAt', 'updatedAt'])
+          && d.className == get(/databases/$(database)/documents/classes/$(d.classId)).data.name;
+      }
+
+      allow create: if validSession(request.resource.data) && (
+        isAdmin()
+        || (teaches(request.resource.data.classId)
+            && request.resource.data.teacherUid == request.auth.uid
+            && teacherFieldsOk(request.resource.data))
+      );
+
+      allow update: if validSession(request.resource.data) && (
+        isAdmin()
+        || (resource.data.teacherUid == request.auth.uid
+            && request.resource.data.teacherUid == request.auth.uid
+            && request.resource.data.classId == resource.data.classId
+            && request.resource.data.epochDay == resource.data.epochDay
+            && teaches(request.resource.data.classId)
+            && teacherFieldsOk(request.resource.data))
+      );
+
+      allow delete: if isAdmin()
+        || (isActive() && resource.data.teacherUid == request.auth.uid);
+    }
+  }
+}

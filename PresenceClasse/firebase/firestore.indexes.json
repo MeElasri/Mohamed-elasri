@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "classId", "order": "ASCENDING" },
+        { "fieldPath": "epochDay", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
