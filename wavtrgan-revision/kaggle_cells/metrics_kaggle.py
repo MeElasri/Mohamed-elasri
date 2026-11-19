@@ -1,3 +1,5 @@
+!pip install -q pytorch-fid        # FID weights (Kaggle: Settings -> Internet ON)
+
 # =====================================================================================================
 # WavTRGAN revision - ALL metrics of Tables 3, 5 and 6 with one code, for every method of one setting.
 # Paste this whole cell into a Kaggle notebook (Internet ON for FID) and run it once per setting:
@@ -24,7 +26,7 @@ OUT_DIRS = {                                                    # one line per m
 }
 MASK_DIR = None                                                 # None: the hole = white pixels of the corrupted image
 SIZE = (256, 256)                                               # evaluation resolution
-FID = True                                                      # needs:  !pip install -q pytorch-fid  (Internet on)
+FID = True                                                      # False to skip FID (no Internet)
 SAVE_DIR = "/kaggle/working/metrics"                            # per-image CSV files are written here
 # -----------------------------------------------------------------------------------------------------
 

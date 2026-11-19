@@ -4,7 +4,7 @@ Each file is one notebook cell: paste it into a Kaggle notebook, edit the paths 
 
 | Cell | What it gives |
 |---|---|
-| `metrics_kaggle.py` | All metrics of one setting for every method: PSNR, SSIM (full image), PSNR_h, SSIM_h (hole only), FID, hole size, and an "Input (no inpainting)" reference row. Run `!pip install -q pytorch-fid` first. |
+| `metrics_kaggle.py` | All metrics of one setting for every method: PSNR, SSIM (full image), PSNR_h, SSIM_h (hole only), FID, hole size, and an "Input (no inpainting)" reference row. It installs pytorch-fid itself (Internet on). |
 | `hole_scores_kaggle.py` | Only PSNR_h and SSIM_h (mean +/- std) for every method of one setting. No extra package. |
 | `fig4_kaggle.py` | Fig. 4: picks the test image whose PSNR is closest to the test average of both models (with and without wavelet), saves the six panels and prints the caption values. |
 | `count_gflops_cmt_tformer.py` | GFLOPs (fvcore) and parameters of CMT and T-former from their official code. |
