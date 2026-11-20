@@ -90,7 +90,9 @@ fun CreateEditGroupScreen(
             driverId = driverId,
             driverName = myProfile?.name ?: existing?.driverName ?: "",
             period = period.name,
-            memberIds = selectedMemberIds.toList()
+            memberIds = selectedMemberIds.toList(),
+            establishmentId = existing?.establishmentId?.takeIf { it.isNotBlank() }
+                ?: myProfile?.establishmentId.orEmpty()
         )
         viewModel.saveGroup(group)
         Toast.makeText(context, "Groupe enregistré", Toast.LENGTH_SHORT).show()

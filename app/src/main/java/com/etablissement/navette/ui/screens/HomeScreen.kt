@@ -56,6 +56,7 @@ import com.etablissement.navette.util.ContactActions
 fun HomeScreen(viewModel: NavetteViewModel) {
     val teachers by viewModel.teachers.collectAsStateWithLifecycle()
     val homeState by viewModel.homeState.collectAsStateWithLifecycle()
+    val myProfile by viewModel.myProfile.collectAsStateWithLifecycle()
 
     // Calculs mis en cache : recalculés seulement si la liste, le jour ou la période change.
     val onNavette = remember(teachers, homeState.day, homeState.period) {
@@ -82,6 +83,15 @@ fun HomeScreen(viewModel: NavetteViewModel) {
                 .padding(padding)
                 .padding(16.dp)
         ) {
+            myProfile?.establishmentName?.takeIf { it.isNotBlank() }?.let { etab ->
+                Text(
+                    text = etab,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
             // Bandeau : jour + période en cours
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -147,7 +157,10 @@ fun HomeScreen(viewModel: NavetteViewModel) {
 
             if (onNavette.isEmpty()) {
                 EmptyState(
-                    message = "Aucun professeur prévu pour cette navette.\n" +
+                    message = if (myProfile?.establishmentId.isNullOrBlank())
+                        "Choisissez d'abord votre établissement dans « Mon profil » " +
+                            "pour voir la navette de vos collègues."
+                    else "Aucun professeur prévu pour cette navette.\n" +
                         "Renseignez votre emploi du temps dans « Mon profil »."
                 )
             } else {

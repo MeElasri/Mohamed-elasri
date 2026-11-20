@@ -2,7 +2,6 @@ package com.etablissement.navette.data.repository
 
 import com.etablissement.navette.data.model.Group
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.channels.awaitClose
@@ -22,9 +21,10 @@ class GroupRepository(
     private val collection get() = db.collection(COLLECTION)
 
     /** Flux temps réel de tous les groupes, triés par nom. */
-    fun observeGroups(): Flow<List<Group>> = callbackFlow {
+    fun observeGroups(establishmentId: String): Flow<List<Group>> = callbackFlow {
+        // Filtre par établissement ; le tri se fait côté appareil pour éviter un index composite.
         val registration = collection
-            .orderBy("name", Query.Direction.ASCENDING)
+            .whereEqualTo("establishmentId", establishmentId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
@@ -32,6 +32,7 @@ class GroupRepository(
                 }
                 val groups = snapshot?.documents
                     ?.mapNotNull { it.toObject(Group::class.java) }
+                    ?.sortedBy { it.name.lowercase() }
                     ?: emptyList()
                 trySend(groups)
             }
@@ -60,7 +61,8 @@ class GroupRepository(
         "driverId" to driverId,
         "driverName" to driverName,
         "period" to period,
-        "memberIds" to memberIds
+        "memberIds" to memberIds,
+        "establishmentId" to establishmentId
     )
 
     companion object {

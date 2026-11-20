@@ -58,7 +58,8 @@ fun GroupsScreen(
     val teachers by viewModel.teachers.collectAsStateWithLifecycle()
     val myProfile by viewModel.myProfile.collectAsStateWithLifecycle()
     val myUid = viewModel.currentUid
-    val canCreate = myProfile?.hasCar == true
+    val hasEstablishment = !myProfile?.establishmentId.isNullOrBlank()
+    val canCreate = myProfile?.hasCar == true && hasEstablishment
 
     var groupToDelete by remember { mutableStateOf<Group?>(null) }
     // Jour pour lequel on affiche les places (aujourd'hui par défaut).
@@ -80,7 +81,22 @@ fun GroupsScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            if (!canCreate) {
+            if (!hasEstablishment) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Text(
+                        text = "Choisissez d'abord votre établissement dans Mon profil : " +
+                            "les groupes affichés sont ceux de votre établissement.",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            } else if (!canCreate) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(

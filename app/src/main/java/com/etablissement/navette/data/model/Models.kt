@@ -66,6 +66,20 @@ enum class GroupPeriod(val label: String) {
 }
 
 /**
+ * Établissement scolaire. Chaque enseignant en choisit un dans son profil ;
+ * les enseignants et les groupes sont cloisonnés par établissement.
+ */
+data class Establishment(
+    @DocumentId
+    val id: String = "",
+    val name: String = "",
+    val city: String = ""
+) {
+    /** Libellé affiché : « Nom — Ville » (ou le nom seul). */
+    fun label(): String = if (city.isBlank()) name else "$name — $city"
+}
+
+/**
  * Groupe de navette (covoiturage) créé par un conducteur (enseignant ayant une voiture).
  *
  * - [driverId] : UID du conducteur créateur (seul à pouvoir modifier/supprimer le groupe).
@@ -82,7 +96,9 @@ data class Group(
     val driverId: String = "",
     val driverName: String = "",
     val period: String = GroupPeriod.BOTH.name,
-    val memberIds: List<String> = emptyList()
+    val memberIds: List<String> = emptyList(),
+    /** Établissement auquel appartient le groupe (celui du conducteur). */
+    val establishmentId: String = ""
 ) {
     companion object {
         /** Nombre total de places dans la voiture, conducteur compris. */
@@ -119,6 +135,9 @@ data class Teacher(
      * Liste vide = disponible tous les jours (valeur par défaut).
      */
     val unavailableDays: List<String> = emptyList(),
+    /** Établissement de l'enseignant : il ne voit que les collègues et groupes de celui-ci. */
+    val establishmentId: String = "",
+    val establishmentName: String = "",
     val schedule: Map<String, List<String>> = emptyMap()
 ) {
     /** Indique si l'enseignant est disponible le [day] donné. */

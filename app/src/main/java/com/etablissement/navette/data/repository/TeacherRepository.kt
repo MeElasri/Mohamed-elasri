@@ -2,7 +2,6 @@ package com.etablissement.navette.data.repository
 
 import com.etablissement.navette.data.model.Teacher
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.channels.awaitClose
@@ -24,9 +23,10 @@ class TeacherRepository(
     /**
      * Flux temps réel de la liste de tous les professeurs, triée par nom.
      */
-    fun observeTeachers(): Flow<List<Teacher>> = callbackFlow {
+    fun observeTeachers(establishmentId: String): Flow<List<Teacher>> = callbackFlow {
+        // Filtre par établissement ; le tri se fait côté appareil pour éviter un index composite.
         val registration = collection
-            .orderBy("name", Query.Direction.ASCENDING)
+            .whereEqualTo("establishmentId", establishmentId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
@@ -34,6 +34,7 @@ class TeacherRepository(
                 }
                 val teachers = snapshot?.documents
                     ?.mapNotNull { it.toObject(Teacher::class.java) }
+                    ?.sortedBy { it.name.lowercase() }
                     ?: emptyList()
                 trySend(teachers)
             }
@@ -71,6 +72,8 @@ class TeacherRepository(
         "hasCar" to hasCar,
         "available" to available,
         "unavailableDays" to unavailableDays,
+        "establishmentId" to establishmentId,
+        "establishmentName" to establishmentName,
         "schedule" to schedule
     )
 

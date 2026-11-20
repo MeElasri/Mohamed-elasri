@@ -2,11 +2,13 @@ package com.etablissement.navette.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.etablissement.navette.data.model.Establishment
 import com.etablissement.navette.data.model.Group
 import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.data.repository.AuthRepository
+import com.etablissement.navette.data.repository.EstablishmentRepository
 import com.etablissement.navette.data.repository.GroupRepository
 import com.etablissement.navette.data.repository.TeacherRepository
 import com.etablissement.navette.util.ScheduleLogic
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -41,11 +44,14 @@ data class HomeUiState(
 class NavetteViewModel(
     private val authRepository: AuthRepository,
     private val teacherRepository: TeacherRepository,
-    private val groupRepository: GroupRepository
+    private val groupRepository: GroupRepository,
+    private val establishmentRepository: EstablishmentRepository
 ) : ViewModel() {
 
     // Constructeur sans argument requis par la fabrique par défaut de viewModel().
-    constructor() : this(AuthRepository(), TeacherRepository(), GroupRepository())
+    constructor() : this(
+        AuthRepository(), TeacherRepository(), GroupRepository(), EstablishmentRepository()
+    )
 
     val currentUid: String? get() = authRepository.currentUid
 
@@ -58,41 +64,64 @@ class NavetteViewModel(
             initialValue = AuthState.Loading
         )
 
-    /** Liste de tous les enseignants, synchronisée en temps réel. */
-    val teachers: StateFlow<List<Teacher>> = teacherRepository.observeTeachers()
-        .catch { error -> _errorMessage.value = error.message }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
-
-    /** Liste de tous les groupes de navette, synchronisée en temps réel. */
-    val groups: StateFlow<List<Group>> = groupRepository.observeGroups()
-        .catch { error -> _errorMessage.value = error.message }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     /** Profil de l'enseignant connecté (null si pas encore créé). */
     val myProfile: StateFlow<Teacher?> = authRepository.authStateFlow()
         .flatMapLatest { uid ->
-            if (uid == null) flowOf(null) else teacherRepository.observeMyProfile(uid)
+            if (uid == null) flowOf(null)
+            else teacherRepository.observeMyProfile(uid)
+                .catch { error -> _errorMessage.value = error.message; emit(null) }
         }
-        .catch { error -> _errorMessage.value = error.message }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null
         )
 
+    /** Identifiant de l'établissement de l'enseignant connecté ("" s'il n'en a pas choisi). */
+    private val myEstablishmentId: Flow<String> = myProfile
+        .map { it?.establishmentId.orEmpty() }
+        .distinctUntilChanged()
+
+    /** Enseignants du même établissement, synchronisés en temps réel. */
+    val teachers: StateFlow<List<Teacher>> = myEstablishmentId
+        .flatMapLatest { id ->
+            if (id.isBlank()) flowOf(emptyList())
+            else teacherRepository.observeTeachers(id)
+                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    /** Groupes de navette du même établissement, synchronisés en temps réel. */
+    val groups: StateFlow<List<Group>> = myEstablishmentId
+        .flatMapLatest { id ->
+            if (id.isBlank()) flowOf(emptyList())
+            else groupRepository.observeGroups(id)
+                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    /** Liste de tous les établissements (pour le choix dans le profil). */
+    val establishments: StateFlow<List<Establishment>> = establishmentRepository.observeAll()
+        .catch { error -> _errorMessage.value = error.message }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
     private val _homeState = MutableStateFlow(HomeUiState())
     val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
-
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private val _authBusy = MutableStateFlow(false)
     val authBusy: StateFlow<Boolean> = _authBusy.asStateFlow()
@@ -157,6 +186,29 @@ class NavetteViewModel(
                 teacherRepository.saveProfile(uid, teacher)
             } catch (e: Exception) {
                 _errorMessage.value = "Échec de l'enregistrement : ${e.message}"
+            }
+        }
+    }
+
+    /**
+     * Ajoute un établissement (ou réutilise celui qui porte déjà ce nom et cette ville),
+     * puis le transmet à [onDone].
+     */
+    fun createEstablishment(name: String, city: String, onDone: (Establishment) -> Unit) {
+        val cleanName = name.trim()
+        val cleanCity = city.trim()
+        val existing = establishments.value.firstOrNull {
+            it.name.equals(cleanName, ignoreCase = true) && it.city.equals(cleanCity, ignoreCase = true)
+        }
+        if (existing != null) {
+            onDone(existing)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                onDone(establishmentRepository.create(cleanName, cleanCity))
+            } catch (e: Exception) {
+                _errorMessage.value = "Échec de l'ajout de l'établissement : ${e.message}"
             }
         }
     }

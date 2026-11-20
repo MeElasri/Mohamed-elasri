@@ -65,26 +65,41 @@ app/src/main/java/com/etablissement/navette/
 
 ### Règles de sécurité Firestore recommandées
 
-Chaque enseignant ne peut modifier **que son propre profil** ; tous les
-enseignants connectés peuvent **lire** la liste (pour voir la navette).
+Chaque enseignant ne peut modifier **que son propre profil** et ne voit que les
+enseignants et les groupes de **son établissement** (choisi dans « Mon profil »).
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Établissement de l'utilisateur connecté (lu dans son propre profil)
+    function myEstablishment() {
+      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.establishmentId;
+    }
+
+    match /establishments/{id} {
+      // Tout enseignant connecté peut lire la liste et y ajouter son établissement
+      allow read, create: if request.auth != null;
+    }
+
     match /teachers/{uid} {
-      // Lecture : tout utilisateur connecté
-      allow read: if request.auth != null;
+      // Lecture : son propre profil, ou les collègues du même établissement
+      allow read: if request.auth != null
+                  && (request.auth.uid == uid
+                      || resource.data.establishmentId == myEstablishment());
       // Écriture : uniquement sur son propre document
       allow write: if request.auth != null && request.auth.uid == uid;
     }
 
     match /groups/{groupId} {
-      // Lecture : tout utilisateur connecté
-      allow read: if request.auth != null;
-      // Création : seulement si on se désigne soi-même comme conducteur
+      // Lecture : groupes de son établissement uniquement
+      allow read: if request.auth != null
+                  && resource.data.establishmentId == myEstablishment();
+      // Création : on se désigne soi-même conducteur, dans son établissement
       allow create: if request.auth != null
-                    && request.resource.data.driverId == request.auth.uid;
+                    && request.resource.data.driverId == request.auth.uid
+                    && request.resource.data.establishmentId == myEstablishment();
       // Modification / suppression : uniquement le conducteur créateur
       allow update, delete: if request.auth != null
                             && resource.data.driverId == request.auth.uid;

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.etablissement.navette.data.model.Establishment
 import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Subjects
 import com.etablissement.navette.data.model.Teacher
@@ -64,6 +67,10 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     var subject by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var hasCar by remember { mutableStateOf(false) }
+    var establishmentId by remember { mutableStateOf("") }
+    var establishmentName by remember { mutableStateOf("") }
+    var establishmentError by remember { mutableStateOf(false) }
+    val establishments by viewModel.establishments.collectAsStateWithLifecycle()
     // Jours d'absence (vide = disponible tous les jours).
     val absentDays = remember { mutableStateListOf<Weekday>() }
     var nameError by remember { mutableStateOf(false) }
@@ -79,6 +86,8 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
             subject = p.subject
             phone = p.phone
             hasCar = p.hasCar
+            establishmentId = p.establishmentId
+            establishmentName = p.establishmentName
             absentDays.clear()
             // Ancien réglage global « indisponible » = absent tous les jours.
             absentDays.addAll(Weekday.entries.filter { !p.isAvailableOn(it) })
@@ -106,8 +115,14 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     }
 
     fun save() {
-        if (name.isBlank()) {
-            nameError = true
+        nameError = name.isBlank()
+        establishmentError = establishmentId.isBlank()
+        if (nameError || establishmentError) {
+            Toast.makeText(
+                context,
+                "Renseignez votre nom et votre établissement",
+                Toast.LENGTH_SHORT
+            ).show()
             return
         }
         viewModel.saveMyProfile(
@@ -119,6 +134,8 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 hasCar = hasCar,
                 available = true,
                 unavailableDays = absentDays.map { it.name },
+                establishmentId = establishmentId,
+                establishmentName = establishmentName,
                 schedule = buildSchedule()
             )
         )
@@ -166,6 +183,24 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 } else null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
+            )
+
+            EstablishmentPicker(
+                selectedLabel = establishmentName,
+                establishments = establishments,
+                isError = establishmentError,
+                onSelected = { establishment ->
+                    establishmentId = establishment.id
+                    establishmentName = establishment.label()
+                    establishmentError = false
+                },
+                onCreate = { newName, newCity ->
+                    viewModel.createEstablishment(newName, newCity) { created ->
+                        establishmentId = created.id
+                        establishmentName = created.label()
+                        establishmentError = false
+                    }
+                }
             )
 
             SubjectDropdown(
@@ -303,6 +338,120 @@ private fun SubjectDropdown(
                 }
             }
         }
+    }
+}
+
+/**
+ * Choix de l'établissement : liste des établissements existants, plus une entrée
+ * pour ajouter le sien s'il n'y figure pas encore.
+ */
+@Composable
+private fun EstablishmentPicker(
+    selectedLabel: String,
+    establishments: List<Establishment>,
+    isError: Boolean,
+    onSelected: (Establishment) -> Unit,
+    onCreate: (name: String, city: String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Établissement *",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(4.dp))
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = selectedLabel.ifBlank { "Choisir mon établissement" },
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                establishments.forEach { establishment ->
+                    DropdownMenuItem(
+                        text = { Text(establishment.label()) },
+                        onClick = {
+                            onSelected(establishment)
+                            expanded = false
+                        }
+                    )
+                }
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "+ Ajouter mon établissement…",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        showDialog = true
+                    }
+                )
+            }
+        }
+        Text(
+            text = if (isError) "Choisissez votre établissement"
+            else "Vous ne verrez que les collègues et les groupes de cet établissement.",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    if (showDialog) {
+        var newName by remember { mutableStateOf("") }
+        var newCity by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Ajouter un établissement") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Vérifiez d'abord qu'il n'est pas déjà dans la liste, " +
+                            "pour que tous vos collègues choisissent le même.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Nom de l'établissement") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = newCity,
+                        onValueChange = { newCity = it },
+                        label = { Text("Ville") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank(),
+                    onClick = {
+                        onCreate(newName, newCity)
+                        showDialog = false
+                    }
+                ) { Text("Ajouter") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) { Text("Annuler") }
+            }
+        )
     }
 }
 
