@@ -57,6 +57,13 @@ class TeacherRepository(
         awaitClose { registration.remove() }
     }
 
+    /** Enseignants rattachés à un établissement, lus une fois (écran d'administration). */
+    suspend fun fetchByEstablishment(establishmentId: String): List<Teacher> =
+        collection.whereEqualTo("establishmentId", establishmentId).get().await()
+            .documents
+            .mapNotNull { it.toObject(Teacher::class.java) }
+            .sortedBy { it.name.lowercase() }
+
     /**
      * Crée ou met à jour le profil de l'enseignant [uid].
      */

@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.etablissement.navette.R
+import com.etablissement.navette.data.model.GroupPeriod
 import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
@@ -59,6 +60,7 @@ fun HomeScreen(viewModel: NavetteViewModel) {
     val homeState by viewModel.homeState.collectAsStateWithLifecycle()
     val myProfile by viewModel.myProfile.collectAsStateWithLifecycle()
     val myEstablishment by viewModel.myEstablishment.collectAsStateWithLifecycle()
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
 
     // Calculs mis en cache : recalculés seulement si la liste, le jour ou la période change.
     val onNavette = remember(teachers, homeState.day, homeState.period) {
@@ -66,6 +68,19 @@ fun HomeScreen(viewModel: NavetteViewModel) {
     }
     val drivers = remember(onNavette) { onNavette.filter { it.hasCar } }
     val passengers = remember(onNavette) { onNavette.filterNot { it.hasCar } }
+
+    // Pour chaque enseignant : ses groupes concernés par la période affichée.
+    val groupLabels = remember(groups, homeState.period) {
+        val labels = mutableMapOf<String, MutableList<String>>()
+        groups.filter { group ->
+            val period = GroupPeriod.fromName(group.period)
+            period == GroupPeriod.BOTH || period.name == homeState.period.name
+        }.forEach { group ->
+            labels.getOrPut(group.driverId) { mutableListOf() }.add("${group.name} (conducteur)")
+            group.memberIds.forEach { id -> labels.getOrPut(id) { mutableListOf() }.add(group.name) }
+        }
+        labels.mapValues { it.value.joinToString(", ") }
+    }
 
     Scaffold(
         topBar = {
@@ -174,7 +189,12 @@ fun HomeScreen(viewModel: NavetteViewModel) {
                             )
                         }
                         items(drivers, key = { it.id }) {
-                            TeacherNavetteCard(it, isDriver = true, available = it.isAvailableOn(homeState.day))
+                            TeacherNavetteCard(
+                                teacher = it,
+                                isDriver = true,
+                                available = it.isAvailableOn(homeState.day),
+                                groupLabel = groupLabels[it.id]
+                            )
                         }
                     }
                     if (passengers.isNotEmpty()) {
@@ -186,7 +206,12 @@ fun HomeScreen(viewModel: NavetteViewModel) {
                             )
                         }
                         items(passengers, key = { it.id }) {
-                            TeacherNavetteCard(it, isDriver = false, available = it.isAvailableOn(homeState.day))
+                            TeacherNavetteCard(
+                                teacher = it,
+                                isDriver = false,
+                                available = it.isAvailableOn(homeState.day),
+                                groupLabel = groupLabels[it.id]
+                            )
                         }
                     }
                 }
@@ -221,7 +246,12 @@ private fun SectionHeader(icon: ImageVector, title: String, count: Int) {
 }
 
 @Composable
-private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean, available: Boolean) {
+private fun TeacherNavetteCard(
+    teacher: Teacher,
+    isDriver: Boolean,
+    available: Boolean,
+    groupLabel: String?
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -254,6 +284,13 @@ private fun TeacherNavetteCard(teacher: Teacher, isDriver: Boolean, available: B
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Text(
+                    text = if (groupLabel != null) "Groupe : $groupLabel" else "Sans groupe",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (groupLabel != null) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (groupLabel != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text(
                     text = if (available) "● Disponible" else "● Indisponible ce jour",
                     style = MaterialTheme.typography.labelMedium,

@@ -281,6 +281,12 @@ class NavetteViewModel(
             establishmentRepository.regenerateCode(establishment)
         }
 
+    /** Charge les enseignants d'un établissement pour l'écran d'administration. */
+    fun adminLoadTeachers(establishmentId: String, onLoaded: (List<Teacher>) -> Unit) =
+        adminAction("Échec du chargement des enseignants") {
+            onLoaded(teacherRepository.fetchByEstablishment(establishmentId))
+        }
+
     fun adminRecount(id: String) =
         adminAction("Échec du recomptage") { establishmentRepository.recount(id) }
 

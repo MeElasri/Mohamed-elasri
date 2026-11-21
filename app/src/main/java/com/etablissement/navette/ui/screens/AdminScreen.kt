@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.etablissement.navette.data.model.Establishment
+import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.ui.NavetteViewModel
 import com.etablissement.navette.ui.formatDate
 
@@ -60,6 +62,7 @@ fun AdminScreen(viewModel: NavetteViewModel) {
     var showCreate by remember { mutableStateOf(false) }
     var editSeats by remember { mutableStateOf<Establishment?>(null) }
     var confirmCode by remember { mutableStateOf<Establishment?>(null) }
+    var showTeachersOf by remember { mutableStateOf<Establishment?>(null) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Licences des établissements") }) },
@@ -90,7 +93,8 @@ fun AdminScreen(viewModel: NavetteViewModel) {
                         onExtend = { months -> viewModel.adminExtend(establishment, months) },
                         onEditSeats = { editSeats = establishment },
                         onNewCode = { confirmCode = establishment },
-                        onRecount = { viewModel.adminRecount(establishment.id) }
+                        onRecount = { viewModel.adminRecount(establishment.id) },
+                        onShowTeachers = { showTeachersOf = establishment }
                     )
                 }
                 item { Spacer(Modifier.height(72.dp)) }
@@ -135,6 +139,14 @@ fun AdminScreen(viewModel: NavetteViewModel) {
         )
     }
 
+    showTeachersOf?.let { establishment ->
+        TeachersDialog(
+            establishment = establishment,
+            viewModel = viewModel,
+            onDismiss = { showTeachersOf = null }
+        )
+    }
+
     confirmCode?.let { establishment ->
         AlertDialog(
             onDismissRequest = { confirmCode = null },
@@ -163,7 +175,8 @@ private fun LicenseCard(
     onExtend: (Int) -> Unit,
     onEditSeats: () -> Unit,
     onNewCode: () -> Unit,
-    onRecount: () -> Unit
+    onRecount: () -> Unit,
+    onShowTeachers: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -239,9 +252,65 @@ private fun LicenseCard(
                     Text(if (establishment.code.isBlank()) "Créer un code" else "Nouveau code")
                 }
                 TextButton(onClick = onRecount) { Text("Recompter") }
+                TextButton(onClick = onShowTeachers) { Text("Enseignants") }
             }
         }
     }
+}
+
+/** Liste des enseignants rattachés à un établissement. */
+@Composable
+private fun TeachersDialog(
+    establishment: Establishment,
+    viewModel: NavetteViewModel,
+    onDismiss: () -> Unit
+) {
+    var teachers by remember(establishment.id) { mutableStateOf<List<Teacher>?>(null) }
+    LaunchedEffect(establishment.id) {
+        viewModel.adminLoadTeachers(establishment.id) { teachers = it }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(establishment.label()) },
+        text = {
+            val list = teachers
+            when {
+                list == null -> Text("Chargement…")
+                list.isEmpty() -> Text("Aucun enseignant n'a encore rejoint cet établissement.")
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item {
+                        Text(
+                            text = "${list.size} enseignant${if (list.size > 1) "s" else ""}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    items(list, key = { it.id }) { teacher ->
+                        Column {
+                            Text(
+                                text = teacher.name.ifBlank { "(profil non rempli)" } +
+                                    if (teacher.hasCar) "  •  voiture" else "",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            val details = listOf(teacher.subject, teacher.phone, teacher.email)
+                                .filter { it.isNotBlank() }
+                                .joinToString(" • ")
+                            if (details.isNotBlank()) {
+                                Text(
+                                    text = details,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } }
+    )
 }
 
 @Composable
