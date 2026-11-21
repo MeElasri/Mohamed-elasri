@@ -5,8 +5,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
-import java.time.Instant
-import java.time.ZoneId
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -16,9 +14,9 @@ import kotlinx.coroutines.tasks.await
 class JoinException(message: String) : Exception(message)
 
 /**
- * Établissements et licences.
+ * Établissements et codes d'accès.
  *
- * - "establishments/{id}" : nom, ville et licence (active, expiration, places, code).
+ * - "establishments/{id}" : nom, ville et code d'accès.
  * - "licenseCodes/{code}" : renvoie vers l'établissement ; lisible seulement si l'on
  *   connaît le code, ce qui permet à un enseignant de rejoindre sans pouvoir lister.
  * - "admins/{uid}" : comptes administrateurs (créés à la main dans la console Firebase).
@@ -61,25 +59,11 @@ class EstablishmentRepository(
         awaitClose { registration.remove() }
     }
 
-    /** Un établissement et l'état de sa licence, en temps réel. */
-    fun observe(id: String): Flow<Establishment?> = callbackFlow {
-        val registration = establishments.document(id)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-                trySend(snapshot?.toObject(Establishment::class.java))
-            }
-        awaitClose { registration.remove() }
-    }
-
     // ---------------------------------------------------------------- Enseignant
 
     /**
-     * Fait rejoindre l'établissement correspondant au code d'accès [rawCode].
-     * Le compteur de places et le profil sont mis à jour dans une même transaction,
-     * que le serveur n'accepte que si le code, la licence et la limite sont respectés.
+     * Rattache l'enseignant à l'établissement correspondant au code d'accès [rawCode].
+     * Le serveur n'accepte l'écriture que si le code correspond bien à cet établissement.
      *
      * @throws JoinException avec un message à afficher à l'utilisateur.
      */
@@ -89,106 +73,41 @@ class EstablishmentRepository(
 
         val establishmentId = codes.document(code).get().await().getString("establishmentId")
             ?: throw JoinException("Code d'accès inconnu")
-        val ref = establishments.document(establishmentId)
-        val teacherRef = teachers.document(uid)
-
-        val current = ref.get().await().toObject(Establishment::class.java)
+        val establishment = establishments.document(establishmentId).get().await()
+            .toObject(Establishment::class.java)
             ?: throw JoinException("Établissement introuvable")
-        val alreadyMember =
-            teacherRef.get().await().getString("establishmentId") == establishmentId
-
-        if (!current.active) {
-            throw JoinException("La licence de cet établissement est suspendue")
-        }
-        if (current.expiresAtMillis <= System.currentTimeMillis()) {
-            throw JoinException("La licence de cet établissement a expiré")
-        }
-        if (alreadyMember) return current
-        if (current.memberCount >= current.maxTeachers) {
-            throw JoinException(
-                "Nombre maximum d'enseignants atteint (${current.maxTeachers}) pour cet établissement"
-            )
-        }
 
         try {
-            return db.runTransaction { tx ->
-                val fresh = tx.get(ref).toObject(Establishment::class.java) ?: current
-                tx.update(ref, "memberCount", fresh.memberCount + 1)
-                tx.set(
-                    teacherRef,
-                    mapOf(
-                        "establishmentId" to establishmentId,
-                        "establishmentName" to fresh.label(),
-                        "joinCode" to code
-                    ),
-                    SetOptions.merge()
-                )
-                fresh
-            }.await()
+            teachers.document(uid).set(
+                mapOf(
+                    "establishmentId" to establishmentId,
+                    "establishmentName" to establishment.label(),
+                    "joinCode" to code
+                ),
+                SetOptions.merge()
+            ).await()
         } catch (e: Exception) {
-            throw JoinException(
-                "Impossible de rejoindre l'établissement (licence expirée, suspendue ou complète)"
-            )
+            throw JoinException("Impossible de rejoindre l'établissement : ${e.message}")
         }
+        return establishment
     }
 
     // ------------------------------------------------------------ Administrateur
 
-    /** Crée un établissement avec sa licence et son code d'accès. */
-    suspend fun create(name: String, city: String, maxTeachers: Int, months: Int): Establishment {
+    /** Crée un établissement et son code d'accès. */
+    suspend fun create(name: String, city: String): Establishment {
         val ref = establishments.document()
         val code = generateCode()
-        val establishment = Establishment(
-            id = ref.id,
-            name = name,
-            city = city,
-            active = true,
-            expiresAtMillis = addMonths(System.currentTimeMillis(), months),
-            maxTeachers = maxTeachers,
-            memberCount = 0,
-            code = code
-        )
         db.runBatch { batch ->
-            batch.set(
-                ref,
-                mapOf(
-                    "name" to establishment.name,
-                    "city" to establishment.city,
-                    "active" to establishment.active,
-                    "expiresAtMillis" to establishment.expiresAtMillis,
-                    "maxTeachers" to establishment.maxTeachers,
-                    "memberCount" to establishment.memberCount,
-                    "code" to establishment.code
-                )
-            )
+            batch.set(ref, mapOf("name" to name, "city" to city, "code" to code))
             batch.set(codes.document(code), mapOf("establishmentId" to ref.id))
         }.await()
-        return establishment
-    }
-
-    /** Suspend ou réactive une licence. */
-    suspend fun setActive(id: String, active: Boolean) {
-        establishments.document(id).update("active", active).await()
-    }
-
-    /** Modifie le nombre maximum d'enseignants. */
-    suspend fun setMaxTeachers(id: String, maxTeachers: Int) {
-        establishments.document(id).update("maxTeachers", maxTeachers).await()
-    }
-
-    /**
-     * Prolonge la licence de [months] mois, à partir de sa date de fin
-     * (ou d'aujourd'hui si elle est déjà expirée).
-     */
-    suspend fun extend(establishment: Establishment, months: Int) {
-        val from = maxOf(establishment.expiresAtMillis, System.currentTimeMillis())
-        establishments.document(establishment.id)
-            .update("expiresAtMillis", addMonths(from, months)).await()
+        return Establishment(id = ref.id, name = name, city = city, code = code)
     }
 
     /**
      * Remplace le code d'accès : l'ancien cesse de fonctionner pour les nouveaux
-     * arrivants ; les enseignants déjà membres ne sont pas affectés.
+     * arrivants ; les enseignants déjà rattachés ne sont pas affectés.
      */
     suspend fun regenerateCode(establishment: Establishment): String {
         val newCode = generateCode()
@@ -201,20 +120,6 @@ class EstablishmentRepository(
         }.await()
         return newCode
     }
-
-    /** Recalcule le nombre réel d'enseignants rattachés (après des départs, par exemple). */
-    suspend fun recount(id: String): Int {
-        val count = teachers.whereEqualTo("establishmentId", id).get().await().size()
-        establishments.document(id).update("memberCount", count).await()
-        return count
-    }
-
-    private fun addMonths(fromMillis: Long, months: Int): Long =
-        Instant.ofEpochMilli(fromMillis)
-            .atZone(ZoneId.systemDefault())
-            .plusMonths(months.toLong())
-            .toInstant()
-            .toEpochMilli()
 
     companion object {
         // Sans caractères ambigus (0/O, 1/I/L).

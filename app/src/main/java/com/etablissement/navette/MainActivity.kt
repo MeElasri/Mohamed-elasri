@@ -123,10 +123,10 @@ private fun MainApp(viewModel: NavetteViewModel) {
         add(Triple(Routes.GROUPS, "Groupes", Icons.Filled.Groups))
         add(Triple(Routes.PROFILE, "Mon profil", Icons.Filled.Person))
         if (isAdmin) {
-            // Compte administrateur : gestion des licences de tous les établissements.
-            add(Triple(Routes.ADMIN, "Licences", Icons.Filled.AdminPanelSettings))
+            // Compte administrateur : activation des abonnements et gestion des établissements.
+            add(Triple(Routes.ADMIN, "Admin", Icons.Filled.AdminPanelSettings))
         } else {
-            // Enseignants : état de l'abonnement de leur établissement, en lecture seule.
+            // Enseignants : état de leur abonnement personnel, en lecture seule.
             add(Triple(Routes.SUBSCRIPTION, "Abonnement", Icons.Filled.CardMembership))
         }
     }

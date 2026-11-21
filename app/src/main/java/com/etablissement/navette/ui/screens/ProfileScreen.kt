@@ -50,13 +50,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.etablissement.navette.data.model.Establishment
 import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Subjects
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
-import com.etablissement.navette.ui.formatDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,7 +70,6 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     var establishmentName by remember { mutableStateOf("") }
     var establishmentError by remember { mutableStateOf(false) }
     var joinCode by remember { mutableStateOf("") }
-    val myEstablishment by viewModel.myEstablishment.collectAsStateWithLifecycle()
     val joinBusy by viewModel.joinBusy.collectAsStateWithLifecycle()
     // Jours d'absence (vide = disponible tous les jours).
     val absentDays = remember { mutableStateListOf<Weekday>() }
@@ -192,7 +189,6 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
 
             EstablishmentJoin(
                 currentLabel = establishmentName,
-                establishment = myEstablishment,
                 isError = establishmentError,
                 busy = joinBusy,
                 onJoin = { code ->
@@ -352,12 +348,11 @@ private fun SubjectDropdown(
 
 /**
  * Rattachement à un établissement : l'enseignant saisit le code d'accès fourni
- * par son administration. Le serveur vérifie le code, la licence et la limite de places.
+ * par son administration. Le serveur vérifie le code.
  */
 @Composable
 private fun EstablishmentJoin(
     currentLabel: String,
-    establishment: Establishment?,
     isError: Boolean,
     busy: Boolean,
     onJoin: (String) -> Unit
@@ -382,19 +377,6 @@ private fun EstablishmentJoin(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold
                     )
-                    establishment?.let { e ->
-                        val valid = e.hasValidLicense(System.currentTimeMillis())
-                        Text(
-                            text = when {
-                                !e.active -> "Licence suspendue"
-                                !valid -> "Licence expirée le ${formatDate(e.expiresAtMillis)}"
-                                else -> "Licence valide jusqu'au ${formatDate(e.expiresAtMillis)}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (valid) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.error
-                        )
-                    }
                 }
                 TextButton(onClick = { editing = !editing }) {
                     Text(if (editing) "Annuler" else "Changer")

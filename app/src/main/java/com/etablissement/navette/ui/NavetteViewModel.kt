@@ -5,12 +5,14 @@ import androidx.lifecycle.viewModelScope
 import com.etablissement.navette.data.model.Establishment
 import com.etablissement.navette.data.model.Group
 import com.etablissement.navette.data.model.Period
+import com.etablissement.navette.data.model.Subscription
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.data.repository.AuthRepository
 import com.etablissement.navette.data.repository.EstablishmentRepository
 import com.etablissement.navette.data.repository.GroupRepository
 import com.etablissement.navette.data.repository.JoinException
+import com.etablissement.navette.data.repository.SubscriptionRepository
 import com.etablissement.navette.data.repository.TeacherRepository
 import com.etablissement.navette.util.ScheduleLogic
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -46,112 +49,24 @@ class NavetteViewModel(
     private val authRepository: AuthRepository,
     private val teacherRepository: TeacherRepository,
     private val groupRepository: GroupRepository,
-    private val establishmentRepository: EstablishmentRepository
+    private val establishmentRepository: EstablishmentRepository,
+    private val subscriptionRepository: SubscriptionRepository
 ) : ViewModel() {
 
     // Constructeur sans argument requis par la fabrique par défaut de viewModel().
     constructor() : this(
-        AuthRepository(), TeacherRepository(), GroupRepository(), EstablishmentRepository()
+        AuthRepository(),
+        TeacherRepository(),
+        GroupRepository(),
+        EstablishmentRepository(),
+        SubscriptionRepository()
     )
 
     val currentUid: String? get() = authRepository.currentUid
-
-    /** État d'authentification observé en temps réel. */
-    val authState: StateFlow<AuthState> = authRepository.authStateFlow()
-        .map { uid -> if (uid == null) AuthState.SignedOut else AuthState.SignedIn(uid) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = AuthState.Loading
-        )
+    val currentEmail: String? get() = authRepository.currentEmail
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
-
-    /** Profil de l'enseignant connecté (null si pas encore créé). */
-    val myProfile: StateFlow<Teacher?> = authRepository.authStateFlow()
-        .flatMapLatest { uid ->
-            if (uid == null) flowOf(null)
-            else teacherRepository.observeMyProfile(uid)
-                .catch { error -> _errorMessage.value = error.message; emit(null) }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
-        )
-
-    /** Identifiant de l'établissement de l'enseignant connecté ("" s'il n'en a pas choisi). */
-    private val myEstablishmentId: Flow<String> = myProfile
-        .map { it?.establishmentId.orEmpty() }
-        .distinctUntilChanged()
-
-    /** Établissement de l'enseignant connecté, avec l'état de sa licence. */
-    val myEstablishment: StateFlow<Establishment?> = myEstablishmentId
-        .flatMapLatest { id ->
-            if (id.isBlank()) flowOf(null)
-            else establishmentRepository.observe(id)
-                .catch { error -> _errorMessage.value = error.message; emit(null) }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
-        )
-
-    /**
-     * Identifiant de l'établissement si sa licence est valide, "" sinon :
-     * sans licence valide, aucune donnée n'est demandée au serveur (qui les refuserait).
-     */
-    private val activeEstablishmentId: Flow<String> = myEstablishment
-        .map { e -> if (e != null && e.hasValidLicense(System.currentTimeMillis())) e.id else "" }
-        .distinctUntilChanged()
-
-    /** true si le compte connecté est administrateur (gestion des licences). */
-    val isAdmin: StateFlow<Boolean> = authRepository.authStateFlow()
-        .flatMapLatest { uid ->
-            if (uid == null) flowOf(false) else establishmentRepository.observeIsAdmin(uid)
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = false
-        )
-
-    /** Enseignants du même établissement, synchronisés en temps réel. */
-    val teachers: StateFlow<List<Teacher>> = activeEstablishmentId
-        .flatMapLatest { id ->
-            if (id.isBlank()) flowOf(emptyList())
-            else teacherRepository.observeTeachers(id)
-                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
-
-    /** Groupes de navette du même établissement, synchronisés en temps réel. */
-    val groups: StateFlow<List<Group>> = activeEstablishmentId
-        .flatMapLatest { id ->
-            if (id.isBlank()) flowOf(emptyList())
-            else groupRepository.observeGroups(id)
-                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
-
-    /** Liste de tous les établissements (écran d'administration uniquement). */
-    val establishments: StateFlow<List<Establishment>> = establishmentRepository.observeAll()
-        .catch { error -> _errorMessage.value = error.message }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
 
     private val _homeState = MutableStateFlow(HomeUiState())
     val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
@@ -162,7 +77,104 @@ class NavetteViewModel(
     private val _authBusy = MutableStateFlow(false)
     val authBusy: StateFlow<Boolean> = _authBusy.asStateFlow()
 
-    val currentEmail: String? get() = authRepository.currentEmail
+    private fun <T> Flow<T>.asState(initial: T): StateFlow<T> = stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initial
+    )
+
+    /** État d'authentification observé en temps réel. */
+    val authState: StateFlow<AuthState> = authRepository.authStateFlow()
+        .map { uid -> if (uid == null) AuthState.SignedOut else AuthState.SignedIn(uid) }
+        .asState(AuthState.Loading)
+
+    /** Profil de l'enseignant connecté (null si pas encore créé). */
+    val myProfile: StateFlow<Teacher?> = authRepository.authStateFlow()
+        .flatMapLatest { uid ->
+            if (uid == null) flowOf(null)
+            else teacherRepository.observeMyProfile(uid)
+                .catch { error -> _errorMessage.value = error.message; emit(null) }
+        }
+        .asState(null)
+
+    /** Abonnement individuel du compte connecté (essai ou période payée). */
+    val mySubscription: StateFlow<Subscription?> = authRepository.authStateFlow()
+        .flatMapLatest { uid ->
+            if (uid == null) flowOf(null)
+            else subscriptionRepository.observe(uid)
+                .catch { error -> _errorMessage.value = error.message; emit(null) }
+        }
+        .asState(null)
+
+    /**
+     * Identifiant de l'établissement de l'enseignant si son abonnement lui donne
+     * accès, "" sinon : sans accès, aucune donnée n'est demandée au serveur
+     * (qui les refuserait de toute façon).
+     */
+    private val activeEstablishmentId: Flow<String> =
+        combine(myProfile, mySubscription) { profile, subscription ->
+            val id = profile?.establishmentId.orEmpty()
+            if (id.isNotBlank() && subscription?.hasAccess(System.currentTimeMillis()) == true) id
+            else ""
+        }.distinctUntilChanged()
+
+    /** Enseignants du même établissement, synchronisés en temps réel. */
+    val teachers: StateFlow<List<Teacher>> = activeEstablishmentId
+        .flatMapLatest { id ->
+            if (id.isBlank()) flowOf(emptyList())
+            else teacherRepository.observeTeachers(id)
+                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
+        }
+        .asState(emptyList())
+
+    /** Groupes de navette du même établissement, synchronisés en temps réel. */
+    val groups: StateFlow<List<Group>> = activeEstablishmentId
+        .flatMapLatest { id ->
+            if (id.isBlank()) flowOf(emptyList())
+            else groupRepository.observeGroups(id)
+                .catch { error -> _errorMessage.value = error.message; emit(emptyList()) }
+        }
+        .asState(emptyList())
+
+    /** true si le compte connecté est administrateur. */
+    val isAdmin: StateFlow<Boolean> = authRepository.authStateFlow()
+        .flatMapLatest { uid ->
+            if (uid == null) flowOf(false) else establishmentRepository.observeIsAdmin(uid)
+        }
+        .asState(false)
+
+    // Les trois flux suivants ne sont observés que par l'écran d'administration.
+
+    /** Tous les établissements. */
+    val establishments: StateFlow<List<Establishment>> = establishmentRepository.observeAll()
+        .catch { error -> _errorMessage.value = error.message }
+        .asState(emptyList())
+
+    /** Tous les abonnements. */
+    val allSubscriptions: StateFlow<List<Subscription>> = subscriptionRepository.observeAll()
+        .catch { error -> _errorMessage.value = error.message }
+        .asState(emptyList())
+
+    /** Tous les enseignants (pour afficher le nom et l'établissement de chaque abonné). */
+    val allTeachers: StateFlow<List<Teacher>> = teacherRepository.observeAll()
+        .catch { error -> _errorMessage.value = error.message }
+        .asState(emptyList())
+
+    init {
+        // À chaque connexion : crée l'abonnement du compte s'il n'existe pas encore,
+        // ce qui démarre la période d'essai.
+        viewModelScope.launch {
+            authRepository.authStateFlow().collect { uid ->
+                if (uid != null) {
+                    try {
+                        subscriptionRepository.ensure(uid, authRepository.currentEmail.orEmpty())
+                    } catch (e: Exception) {
+                        _errorMessage.value = "Impossible d'initialiser l'abonnement : ${e.message}"
+                    }
+                }
+            }
+        }
+    }
 
     // --- Navette (écran d'accueil) ---
 
@@ -226,8 +238,6 @@ class NavetteViewModel(
         }
     }
 
-    // --- Établissement et licence ---
-
     /** Rejoint l'établissement correspondant au code d'accès ; [onJoined] reçoit l'établissement. */
     fun joinEstablishment(code: String, onJoined: (Establishment, String) -> Unit) {
         val uid = authRepository.currentUid ?: return
@@ -246,7 +256,7 @@ class NavetteViewModel(
         }
     }
 
-    // --- Administration des licences ---
+    // --- Administration ---
 
     private fun adminAction(failure: String, block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -258,37 +268,27 @@ class NavetteViewModel(
         }
     }
 
-    fun adminCreateEstablishment(name: String, city: String, maxTeachers: Int, months: Int) =
+    /** Ajoute des mois payés à un abonnement (après réception du paiement). */
+    fun adminAddPaidMonths(subscription: Subscription, months: Int) =
+        adminAction("Échec de l'activation") {
+            subscriptionRepository.addPaidMonths(subscription, months)
+        }
+
+    fun adminEndPaidPeriod(uid: String) =
+        adminAction("Échec de la modification") { subscriptionRepository.endPaidPeriod(uid) }
+
+    fun adminSetSubscriptionActive(uid: String, active: Boolean) =
+        adminAction("Échec de la modification") { subscriptionRepository.setActive(uid, active) }
+
+    fun adminCreateEstablishment(name: String, city: String) =
         adminAction("Échec de la création") {
-            establishmentRepository.create(name.trim(), city.trim(), maxTeachers, months)
-        }
-
-    fun adminSetActive(id: String, active: Boolean) =
-        adminAction("Échec de la modification") { establishmentRepository.setActive(id, active) }
-
-    fun adminSetMaxTeachers(id: String, maxTeachers: Int) =
-        adminAction("Échec de la modification") {
-            establishmentRepository.setMaxTeachers(id, maxTeachers)
-        }
-
-    fun adminExtend(establishment: Establishment, months: Int) =
-        adminAction("Échec de la prolongation") {
-            establishmentRepository.extend(establishment, months)
+            establishmentRepository.create(name.trim(), city.trim())
         }
 
     fun adminRegenerateCode(establishment: Establishment) =
         adminAction("Échec du changement de code") {
             establishmentRepository.regenerateCode(establishment)
         }
-
-    /** Charge les enseignants d'un établissement pour l'écran d'administration. */
-    fun adminLoadTeachers(establishmentId: String, onLoaded: (List<Teacher>) -> Unit) =
-        adminAction("Échec du chargement des enseignants") {
-            onLoaded(teacherRepository.fetchByEstablishment(establishmentId))
-        }
-
-    fun adminRecount(id: String) =
-        adminAction("Échec du recomptage") { establishmentRepository.recount(id) }
 
     // --- Groupes de navette ---
 
@@ -340,19 +340,25 @@ class NavetteViewModel(
 
 /**
  * Message à afficher quand l'utilisateur ne peut pas voir les données de son
- * établissement (pas encore rejoint, licence suspendue ou expirée) ; null si tout va bien.
+ * établissement (pas encore rattaché, essai terminé, abonnement expiré ou
+ * suspendu) ; null si tout va bien ou si l'abonnement est en cours de chargement.
  */
-fun licenseProblem(profile: Teacher?, establishment: Establishment?): String? = when {
-    profile?.establishmentId.isNullOrBlank() ->
-        "Rejoignez d'abord votre établissement dans « Mon profil », avec le code d'accès " +
-            "fourni par votre administration."
-    establishment == null -> null
-    !establishment.active ->
-        "La licence de votre établissement est suspendue. Contactez votre administration."
-    establishment.expiresAtMillis <= System.currentTimeMillis() ->
-        "La licence de votre établissement a expiré le ${formatDate(establishment.expiresAtMillis)}. " +
-            "Contactez votre administration."
-    else -> null
+fun accessProblem(profile: Teacher?, subscription: Subscription?): String? {
+    val now = System.currentTimeMillis()
+    return when {
+        subscription != null && !subscription.active ->
+            "Votre abonnement est suspendu. Contactez le fournisseur de l'application."
+        subscription != null && !subscription.hasAccess(now) ->
+            if (subscription.paidUntilMillis > 0L)
+                "Votre abonnement a expiré le ${formatDate(subscription.paidUntilMillis)}. " +
+                    "Renouvelez-le pour retrouver la navette et les groupes (onglet « Abonnement »)."
+            else
+                "Votre période d'essai gratuite est terminée. " +
+                    "Abonnez-vous pour continuer (onglet « Abonnement »)."
+        profile?.establishmentId.isNullOrBlank() ->
+            "Rejoignez d'abord votre établissement dans « Mon profil », avec son code d'accès."
+        else -> null
+    }
 }
 
 /** Date au format jj/mm/aaaa. */

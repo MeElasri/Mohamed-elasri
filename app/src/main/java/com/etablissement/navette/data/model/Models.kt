@@ -1,5 +1,6 @@
 package com.etablissement.navette.data.model
 
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 
 /**
@@ -66,34 +67,56 @@ enum class GroupPeriod(val label: String) {
 }
 
 /**
- * Établissement scolaire et sa licence.
- *
- * Seul un administrateur peut créer un établissement et gérer sa licence.
- * Les enseignants le rejoignent avec le [code] d'accès ; ils n'accèdent aux
- * données que si la licence est [active] et non expirée ([expiresAtMillis]),
- * dans la limite de [maxTeachers] enseignants.
+ * Établissement scolaire. Créé par un administrateur ; les enseignants le
+ * rejoignent avec son [code] d'accès. Il sert uniquement à regrouper les
+ * collègues : l'abonnement, lui, est individuel (voir [Subscription]).
  */
 data class Establishment(
     @DocumentId
     val id: String = "",
     val name: String = "",
     val city: String = "",
-    /** false = licence suspendue par l'administrateur. */
-    val active: Boolean = false,
-    /** Date de fin de licence (millisecondes depuis 1970). */
-    val expiresAtMillis: Long = 0L,
-    /** Nombre maximum d'enseignants autorisés par la licence. */
-    val maxTeachers: Int = 0,
-    /** Nombre d'enseignants ayant rejoint l'établissement. */
-    val memberCount: Int = 0,
     /** Code d'accès à communiquer aux enseignants de l'établissement. */
     val code: String = ""
 ) {
     /** Libellé affiché : « Nom — Ville » (ou le nom seul). */
     fun label(): String = if (city.isBlank()) name else "$name — $city"
+}
 
-    /** La licence est-elle utilisable à l'instant [now] ? */
-    fun hasValidLicense(now: Long): Boolean = active && expiresAtMillis > now
+/**
+ * Abonnement individuel d'un enseignant (document subscriptions/{uid}).
+ *
+ * Créé automatiquement à la première connexion : il ouvre une période d'essai
+ * de [TRIAL_DAYS] jours à partir de [createdAt] (date du serveur). Ensuite,
+ * seul un administrateur peut accorder une période payée ([paidUntilMillis])
+ * ou suspendre le compte ([active]).
+ */
+data class Subscription(
+    @DocumentId
+    val id: String = "",
+    val email: String = "",
+    val active: Boolean = true,
+    /** Fin de la période payée (millisecondes depuis 1970), 0 si jamais payé. */
+    val paidUntilMillis: Long = 0L,
+    /** Date de création du compte, fixée par le serveur : début de l'essai. */
+    val createdAt: Timestamp? = null
+) {
+    /** Fin de la période d'essai. */
+    fun trialEndMillis(): Long = (createdAt?.toDate()?.time ?: 0L) + TRIAL_DAYS * DAY_MILLIS
+
+    /** Date jusqu'à laquelle l'accès est ouvert (essai ou période payée). */
+    fun validUntilMillis(): Long = maxOf(paidUntilMillis, trialEndMillis())
+
+    /** L'accès est-il ouvert à l'instant [now] ? */
+    fun hasAccess(now: Long): Boolean = active && validUntilMillis() > now
+
+    /** En période d'essai (jamais payé, ou paiement terminé avant la fin de l'essai). */
+    fun onTrial(now: Long): Boolean = paidUntilMillis <= now && trialEndMillis() > now
+
+    companion object {
+        const val TRIAL_DAYS = 7
+        const val DAY_MILLIS = 86_400_000L
+    }
 }
 
 /**
