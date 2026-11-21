@@ -3,6 +3,8 @@ package com.etablissement.navette.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -168,6 +170,7 @@ fun AdminScreen(viewModel: NavetteViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LicenseCard(
     establishment: Establishment,
@@ -242,12 +245,11 @@ private fun LicenseCard(
 
             Spacer(Modifier.height(4.dp))
 
-            Row {
+            // FlowRow : les actions passent à la ligne sur les écrans étroits.
+            FlowRow {
                 TextButton(onClick = { onExtend(1) }) { Text("+1 mois") }
                 TextButton(onClick = { onExtend(12) }) { Text("+1 an") }
                 TextButton(onClick = onEditSeats) { Text("Places") }
-            }
-            Row {
                 TextButton(onClick = onNewCode) {
                     Text(if (establishment.code.isBlank()) "Créer un code" else "Nouveau code")
                 }
