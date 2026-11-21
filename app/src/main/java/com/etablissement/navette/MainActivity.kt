@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.CardMembership
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
@@ -48,6 +49,7 @@ import com.etablissement.navette.ui.screens.GroupsScreen
 import com.etablissement.navette.ui.screens.HomeScreen
 import com.etablissement.navette.ui.screens.LoginScreen
 import com.etablissement.navette.ui.screens.ProfileScreen
+import com.etablissement.navette.ui.screens.SubscriptionScreen
 import com.etablissement.navette.ui.theme.NavetteProfsTheme
 
 class MainActivity : ComponentActivity() {
@@ -69,11 +71,12 @@ private object Routes {
     const val PROFILE = "profile"
     const val GROUPS = "groups"
     const val ADMIN = "admin"
+    const val SUBSCRIPTION = "subscription"
     const val GROUP_EDIT_ARG = "groupEdit?groupId={groupId}"
     fun groupEdit(groupId: String? = null) =
         if (groupId == null) "groupEdit" else "groupEdit?groupId=$groupId"
 
-    val bottomRoutes = listOf(HOME, PROFILE, GROUPS, ADMIN)
+    val bottomRoutes = listOf(HOME, PROFILE, GROUPS, ADMIN, SUBSCRIPTION)
 }
 
 @Composable
@@ -119,8 +122,13 @@ private fun MainApp(viewModel: NavetteViewModel) {
         add(Triple(Routes.HOME, "Navette", Icons.Filled.DirectionsBus))
         add(Triple(Routes.GROUPS, "Groupes", Icons.Filled.Groups))
         add(Triple(Routes.PROFILE, "Mon profil", Icons.Filled.Person))
-        // Onglet réservé aux comptes administrateurs (gestion des licences).
-        if (isAdmin) add(Triple(Routes.ADMIN, "Licences", Icons.Filled.AdminPanelSettings))
+        if (isAdmin) {
+            // Compte administrateur : gestion des licences de tous les établissements.
+            add(Triple(Routes.ADMIN, "Licences", Icons.Filled.AdminPanelSettings))
+        } else {
+            // Enseignants : état de l'abonnement de leur établissement, en lecture seule.
+            add(Triple(Routes.SUBSCRIPTION, "Abonnement", Icons.Filled.CardMembership))
+        }
     }
 
     Scaffold(
@@ -170,6 +178,7 @@ private fun MainApp(viewModel: NavetteViewModel) {
             }
             composable(Routes.PROFILE) { ProfileScreen(viewModel = viewModel) }
             composable(Routes.ADMIN) { AdminScreen(viewModel = viewModel) }
+            composable(Routes.SUBSCRIPTION) { SubscriptionScreen(viewModel = viewModel) }
             composable(
                 route = Routes.GROUP_EDIT_ARG,
                 arguments = listOf(
