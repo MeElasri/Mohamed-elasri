@@ -63,54 +63,44 @@ app/src/main/java/com/etablissement/navette/
 > ⚠️ `app/google-services.json` est volontairement ignoré par git (`.gitignore`)
 > car il contient des identifiants propres à votre projet.
 
-### Règles de sécurité Firestore recommandées
+### Règles de sécurité Firestore
 
-Chaque enseignant ne peut modifier **que son propre profil** et ne voit que les
-enseignants et les groupes de **son établissement** (choisi dans « Mon profil »).
+Les règles sont dans le fichier **`firestore.rules`** à la racine du projet.
+Copiez tout son contenu dans la console Firebase (**Firestore Database → Règles**),
+puis cliquez sur **Publier**.
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
+Elles garantissent, côté serveur, que :
 
-    // Établissement de l'utilisateur connecté (lu dans son propre profil)
-    function myEstablishment() {
-      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.establishmentId;
-    }
+- un enseignant ne voit que les enseignants et groupes de **son établissement** ;
+- il ne peut rejoindre un établissement qu'avec son **code d'accès** ;
+- l'accès est coupé si la licence est **suspendue** ou **expirée** ;
+- le **nombre maximum d'enseignants** de la licence ne peut pas être dépassé ;
+- seul un **administrateur** peut créer un établissement ou modifier une licence.
 
-    match /establishments/{id} {
-      // Tout enseignant connecté peut lire la liste et y ajouter son établissement
-      allow read, create: if request.auth != null;
-    }
+### Compte administrateur (vendeur de l'application)
 
-    match /teachers/{uid} {
-      // Lecture : son propre profil, ou les collègues du même établissement
-      allow read: if request.auth != null
-                  && (request.auth.uid == uid
-                      || resource.data.establishmentId == myEstablishment());
-      // Écriture : uniquement sur son propre document
-      allow write: if request.auth != null && request.auth.uid == uid;
-    }
+L'onglet **Licences** n'apparaît que pour un compte administrateur. Pour désigner
+le vôtre (à faire une seule fois) :
 
-    match /groups/{groupId} {
-      // Lecture : groupes de son établissement uniquement
-      allow read: if request.auth != null
-                  && resource.data.establishmentId == myEstablishment();
-      // Création : on se désigne soi-même conducteur, dans son établissement
-      allow create: if request.auth != null
-                    && request.resource.data.driverId == request.auth.uid
-                    && request.resource.data.establishmentId == myEstablishment();
-      // Modification / suppression : uniquement le conducteur créateur
-      allow update, delete: if request.auth != null
-                            && resource.data.driverId == request.auth.uid;
-    }
-  }
-}
-```
+1. Créez votre compte dans l'application (e-mail + mot de passe).
+2. Console Firebase → **Authentication → Users** : copiez l'**UID** de votre compte.
+3. Console Firebase → **Firestore Database → Données** : créez la collection
+   **`admins`**, avec un document dont l'**ID est votre UID** (un champ quelconque,
+   par exemple `role` = `admin`).
+4. Relancez l'application : l'onglet **Licences** apparaît.
 
-> 💡 La création de groupe est aussi limitée **côté app** aux enseignants ayant
-> une voiture ; la règle ci-dessus garantit en plus qu'on ne peut pas créer un
-> groupe au nom de quelqu'un d'autre.
+Aucun compte ne peut se déclarer administrateur depuis l'application : ce
+document ne peut être créé que dans la console Firebase.
+
+### Vendre une licence à un établissement
+
+1. Onglet **Licences** → **+** : saisissez le nom, la ville, le nombre maximum
+   d'enseignants et la durée en mois. Un **code d'accès** est généré.
+2. Communiquez ce code à l'établissement.
+3. Chaque enseignant crée son compte puis saisit le code dans **Mon profil**.
+4. Depuis la carte de l'établissement, vous pouvez **suspendre** la licence,
+   la **prolonger** (+1 mois, +1 an), changer le nombre de **places**, générer un
+   **nouveau code** ou **recompter** les enseignants rattachés.
 
 ## ▶️ Compilation & exécution
 

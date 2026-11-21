@@ -1,0 +1,114 @@
+rules_version = '2';
+
+// Règles de sécurité Firestore de Navette Profs.
+// À copier dans la console Firebase : Firestore Database > Règles > Publier.
+//
+// Principe : un enseignant n'accède aux données d'un établissement que s'il l'a
+// rejoint avec son code d'accès ET que la licence de cet établissement est
+// active et non expirée. Seul un administrateur (document admins/{uid}) peut
+// créer ou modifier des établissements et leurs licences.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data;
+    }
+
+    function etab(id) {
+      return get(/databases/$(database)/documents/establishments/$(id)).data;
+    }
+
+    function licenseOk(id) {
+      return etab(id).active == true
+        && etab(id).expiresAtMillis > request.time.toMillis();
+    }
+
+    // L'utilisateur est membre de l'établissement [id] et sa licence est valide.
+    function memberOf(id) {
+      return id != ''
+        && myProfile().establishmentId == id
+        && licenseOk(id);
+    }
+
+    // Administrateurs : créés à la main dans la console Firebase uniquement.
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Codes d'accès : lisibles un par un (il faut connaître le code), jamais listables.
+    match /licenseCodes/{code} {
+      allow get: if signedIn();
+      allow list, write: if isAdmin();
+    }
+
+    match /establishments/{id} {
+      allow get: if signedIn();
+      allow list, create, delete: if isAdmin();
+      // Un enseignant qui rejoint l'établissement peut seulement augmenter le
+      // compteur de membres de 1, dans la limite de la licence, et uniquement
+      // dans la même transaction que la mise à jour de son profil.
+      allow update: if isAdmin() || (
+        signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount'])
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && request.resource.data.memberCount <= resource.data.maxTeachers
+        && resource.data.active == true
+        && resource.data.expiresAtMillis > request.time.toMillis()
+        && getAfter(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.establishmentId == id
+        && (
+          !exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+          || myProfile().get('establishmentId', '') != id
+        )
+      );
+    }
+
+    match /teachers/{uid} {
+      // Rejoindre un établissement : il faut son code, et la place doit avoir été
+      // comptée dans la même transaction (ce qui vérifie licence et limite).
+      function joining() {
+        let d = request.resource.data;
+        return get(/databases/$(database)/documents/licenseCodes/$(d.joinCode)).data.establishmentId == d.establishmentId
+          && getAfter(/databases/$(database)/documents/establishments/$(d.establishmentId)).data.memberCount
+             == etab(d.establishmentId).memberCount + 1;
+      }
+
+      allow read: if signedIn() && (
+        request.auth.uid == uid
+        || isAdmin()
+        || memberOf(resource.data.establishmentId)
+      );
+      allow delete: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid && (
+        request.resource.data.get('establishmentId', '') == ''
+        || joining()
+      );
+      allow update: if signedIn() && request.auth.uid == uid && (
+        request.resource.data.get('establishmentId', '') == resource.data.get('establishmentId', '')
+        || request.resource.data.get('establishmentId', '') == ''
+        || joining()
+      );
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn() && memberOf(resource.data.establishmentId);
+      allow create: if signedIn()
+        && request.resource.data.driverId == request.auth.uid
+        && memberOf(request.resource.data.establishmentId);
+      allow update: if signedIn()
+        && resource.data.driverId == request.auth.uid
+        && request.resource.data.driverId == resource.data.driverId
+        && request.resource.data.establishmentId == resource.data.establishmentId
+        && memberOf(resource.data.establishmentId);
+      allow delete: if signedIn() && resource.data.driverId == request.auth.uid;
+    }
+  }
+}

@@ -56,6 +56,7 @@ import com.etablissement.navette.data.model.Subjects
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
+import com.etablissement.navette.ui.formatDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,7 +71,9 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
     var establishmentId by remember { mutableStateOf("") }
     var establishmentName by remember { mutableStateOf("") }
     var establishmentError by remember { mutableStateOf(false) }
-    val establishments by viewModel.establishments.collectAsStateWithLifecycle()
+    var joinCode by remember { mutableStateOf("") }
+    val myEstablishment by viewModel.myEstablishment.collectAsStateWithLifecycle()
+    val joinBusy by viewModel.joinBusy.collectAsStateWithLifecycle()
     // Jours d'absence (vide = disponible tous les jours).
     val absentDays = remember { mutableStateListOf<Weekday>() }
     var nameError by remember { mutableStateOf(false) }
@@ -88,6 +91,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
             hasCar = p.hasCar
             establishmentId = p.establishmentId
             establishmentName = p.establishmentName
+            joinCode = p.joinCode
             absentDays.clear()
             // Ancien réglage global « indisponible » = absent tous les jours.
             absentDays.addAll(Weekday.entries.filter { !p.isAvailableOn(it) })
@@ -120,7 +124,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
         if (nameError || establishmentError) {
             Toast.makeText(
                 context,
-                "Renseignez votre nom et votre établissement",
+                "Renseignez votre nom et rejoignez votre établissement",
                 Toast.LENGTH_SHORT
             ).show()
             return
@@ -136,6 +140,7 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 unavailableDays = absentDays.map { it.name },
                 establishmentId = establishmentId,
                 establishmentName = establishmentName,
+                joinCode = joinCode,
                 schedule = buildSchedule()
             )
         )
@@ -185,20 +190,24 @@ fun ProfileScreen(viewModel: NavetteViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            EstablishmentPicker(
-                selectedLabel = establishmentName,
-                establishments = establishments,
+            EstablishmentJoin(
+                currentLabel = establishmentName,
+                establishment = myEstablishment,
                 isError = establishmentError,
-                onSelected = { establishment ->
-                    establishmentId = establishment.id
-                    establishmentName = establishment.label()
-                    establishmentError = false
-                },
-                onCreate = { newName, newCity ->
-                    viewModel.createEstablishment(newName, newCity) { created ->
-                        establishmentId = created.id
-                        establishmentName = created.label()
+                busy = joinBusy,
+                onJoin = { code ->
+                    // Évite que le profil créé par le serveur n'écrase la saisie en cours.
+                    initialized = true
+                    viewModel.joinEstablishment(code) { joined, usedCode ->
+                        establishmentId = joined.id
+                        establishmentName = joined.label()
+                        joinCode = usedCode
                         establishmentError = false
+                        Toast.makeText(
+                            context,
+                            "Établissement rejoint : ${joined.label()}",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             )
@@ -342,116 +351,85 @@ private fun SubjectDropdown(
 }
 
 /**
- * Choix de l'établissement : liste des établissements existants, plus une entrée
- * pour ajouter le sien s'il n'y figure pas encore.
+ * Rattachement à un établissement : l'enseignant saisit le code d'accès fourni
+ * par son administration. Le serveur vérifie le code, la licence et la limite de places.
  */
 @Composable
-private fun EstablishmentPicker(
-    selectedLabel: String,
-    establishments: List<Establishment>,
+private fun EstablishmentJoin(
+    currentLabel: String,
+    establishment: Establishment?,
     isError: Boolean,
-    onSelected: (Establishment) -> Unit,
-    onCreate: (name: String, city: String) -> Unit
+    busy: Boolean,
+    onJoin: (String) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var showDialog by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    var editing by remember { mutableStateOf(false) }
+    val joined = currentLabel.isNotBlank()
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = "Établissement *",
             style = MaterialTheme.typography.bodySmall,
             color = if (isError) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(4.dp))
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = selectedLabel.ifBlank { "Choisir mon établissement" },
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-            }
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                establishments.forEach { establishment ->
-                    DropdownMenuItem(
-                        text = { Text(establishment.label()) },
-                        onClick = {
-                            onSelected(establishment)
-                            expanded = false
-                        }
+
+        if (joined) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentLabel,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
                     )
-                }
-                DropdownMenuItem(
-                    text = {
+                    establishment?.let { e ->
+                        val valid = e.hasValidLicense(System.currentTimeMillis())
                         Text(
-                            text = "+ Ajouter mon établissement…",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
+                            text = when {
+                                !e.active -> "Licence suspendue"
+                                !valid -> "Licence expirée le ${formatDate(e.expiresAtMillis)}"
+                                else -> "Licence valide jusqu'au ${formatDate(e.expiresAtMillis)}"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (valid) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error
                         )
-                    },
-                    onClick = {
-                        expanded = false
-                        showDialog = true
                     }
-                )
+                }
+                TextButton(onClick = { editing = !editing }) {
+                    Text(if (editing) "Annuler" else "Changer")
+                }
             }
         }
-        Text(
-            text = if (isError) "Choisissez votre établissement"
-            else "Vous ne verrez que les collègues et les groupes de cet établissement.",
-            style = MaterialTheme.typography.bodySmall,
-            color = if (isError) MaterialTheme.colorScheme.error
-            else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
 
-    if (showDialog) {
-        var newName by remember { mutableStateOf("") }
-        var newCity by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("Ajouter un établissement") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Vérifiez d'abord qu'il n'est pas déjà dans la liste, " +
-                            "pour que tous vos collègues choisissent le même.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Nom de l'établissement") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = newCity,
-                        onValueChange = { newCity = it },
-                        label = { Text("Ville") },
-                        singleLine = true
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = newName.isNotBlank(),
+        if (!joined || editing) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.uppercase() },
+                    label = { Text("Code d'accès") },
+                    singleLine = true,
+                    isError = isError && !joined,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedButton(
+                    enabled = !busy && code.isNotBlank(),
                     onClick = {
-                        onCreate(newName, newCity)
-                        showDialog = false
+                        onJoin(code)
+                        editing = false
                     }
-                ) { Text("Ajouter") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDialog = false }) { Text("Annuler") }
+                ) { Text(if (busy) "…" else "Rejoindre") }
             }
-        )
+            Text(
+                text = "Saisissez le code d'accès communiqué par votre établissement.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isError) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

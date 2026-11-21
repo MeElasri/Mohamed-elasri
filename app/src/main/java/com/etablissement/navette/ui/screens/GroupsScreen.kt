@@ -45,6 +45,7 @@ import com.etablissement.navette.data.model.GroupPeriod
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
+import com.etablissement.navette.ui.licenseProblem
 import com.etablissement.navette.util.ScheduleLogic
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,7 +59,9 @@ fun GroupsScreen(
     val teachers by viewModel.teachers.collectAsStateWithLifecycle()
     val myProfile by viewModel.myProfile.collectAsStateWithLifecycle()
     val myUid = viewModel.currentUid
-    val hasEstablishment = !myProfile?.establishmentId.isNullOrBlank()
+    val myEstablishment by viewModel.myEstablishment.collectAsStateWithLifecycle()
+    val problem = licenseProblem(myProfile, myEstablishment)
+    val hasEstablishment = problem == null
     val canCreate = myProfile?.hasCar == true && hasEstablishment
 
     var groupToDelete by remember { mutableStateOf<Group?>(null) }
@@ -89,8 +92,7 @@ fun GroupsScreen(
                     )
                 ) {
                     Text(
-                        text = "Choisissez d'abord votre établissement dans Mon profil : " +
-                            "les groupes affichés sont ceux de votre établissement.",
+                        text = problem.orEmpty(),
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodySmall
                     )

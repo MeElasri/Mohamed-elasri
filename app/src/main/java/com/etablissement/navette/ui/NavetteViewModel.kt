@@ -10,6 +10,7 @@ import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.data.repository.AuthRepository
 import com.etablissement.navette.data.repository.EstablishmentRepository
 import com.etablissement.navette.data.repository.GroupRepository
+import com.etablissement.navette.data.repository.JoinException
 import com.etablissement.navette.data.repository.TeacherRepository
 import com.etablissement.navette.util.ScheduleLogic
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -85,8 +86,40 @@ class NavetteViewModel(
         .map { it?.establishmentId.orEmpty() }
         .distinctUntilChanged()
 
+    /** Établissement de l'enseignant connecté, avec l'état de sa licence. */
+    val myEstablishment: StateFlow<Establishment?> = myEstablishmentId
+        .flatMapLatest { id ->
+            if (id.isBlank()) flowOf(null)
+            else establishmentRepository.observe(id)
+                .catch { error -> _errorMessage.value = error.message; emit(null) }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
+
+    /**
+     * Identifiant de l'établissement si sa licence est valide, "" sinon :
+     * sans licence valide, aucune donnée n'est demandée au serveur (qui les refuserait).
+     */
+    private val activeEstablishmentId: Flow<String> = myEstablishment
+        .map { e -> if (e != null && e.hasValidLicense(System.currentTimeMillis())) e.id else "" }
+        .distinctUntilChanged()
+
+    /** true si le compte connecté est administrateur (gestion des licences). */
+    val isAdmin: StateFlow<Boolean> = authRepository.authStateFlow()
+        .flatMapLatest { uid ->
+            if (uid == null) flowOf(false) else establishmentRepository.observeIsAdmin(uid)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false
+        )
+
     /** Enseignants du même établissement, synchronisés en temps réel. */
-    val teachers: StateFlow<List<Teacher>> = myEstablishmentId
+    val teachers: StateFlow<List<Teacher>> = activeEstablishmentId
         .flatMapLatest { id ->
             if (id.isBlank()) flowOf(emptyList())
             else teacherRepository.observeTeachers(id)
@@ -99,7 +132,7 @@ class NavetteViewModel(
         )
 
     /** Groupes de navette du même établissement, synchronisés en temps réel. */
-    val groups: StateFlow<List<Group>> = myEstablishmentId
+    val groups: StateFlow<List<Group>> = activeEstablishmentId
         .flatMapLatest { id ->
             if (id.isBlank()) flowOf(emptyList())
             else groupRepository.observeGroups(id)
@@ -111,7 +144,7 @@ class NavetteViewModel(
             initialValue = emptyList()
         )
 
-    /** Liste de tous les établissements (pour le choix dans le profil). */
+    /** Liste de tous les établissements (écran d'administration uniquement). */
     val establishments: StateFlow<List<Establishment>> = establishmentRepository.observeAll()
         .catch { error -> _errorMessage.value = error.message }
         .stateIn(
@@ -122,6 +155,9 @@ class NavetteViewModel(
 
     private val _homeState = MutableStateFlow(HomeUiState())
     val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
+
+    private val _joinBusy = MutableStateFlow(false)
+    val joinBusy: StateFlow<Boolean> = _joinBusy.asStateFlow()
 
     private val _authBusy = MutableStateFlow(false)
     val authBusy: StateFlow<Boolean> = _authBusy.asStateFlow()
@@ -190,28 +226,63 @@ class NavetteViewModel(
         }
     }
 
-    /**
-     * Ajoute un établissement (ou réutilise celui qui porte déjà ce nom et cette ville),
-     * puis le transmet à [onDone].
-     */
-    fun createEstablishment(name: String, city: String, onDone: (Establishment) -> Unit) {
-        val cleanName = name.trim()
-        val cleanCity = city.trim()
-        val existing = establishments.value.firstOrNull {
-            it.name.equals(cleanName, ignoreCase = true) && it.city.equals(cleanCity, ignoreCase = true)
-        }
-        if (existing != null) {
-            onDone(existing)
-            return
-        }
+    // --- Établissement et licence ---
+
+    /** Rejoint l'établissement correspondant au code d'accès ; [onJoined] reçoit l'établissement. */
+    fun joinEstablishment(code: String, onJoined: (Establishment, String) -> Unit) {
+        val uid = authRepository.currentUid ?: return
         viewModelScope.launch {
+            _joinBusy.value = true
             try {
-                onDone(establishmentRepository.create(cleanName, cleanCity))
+                val establishment = establishmentRepository.join(uid, code)
+                onJoined(establishment, EstablishmentRepository.normalizeCode(code))
+            } catch (e: JoinException) {
+                _errorMessage.value = e.message
             } catch (e: Exception) {
-                _errorMessage.value = "Échec de l'ajout de l'établissement : ${e.message}"
+                _errorMessage.value = "Impossible de vérifier le code : ${e.message}"
+            } finally {
+                _joinBusy.value = false
             }
         }
     }
+
+    // --- Administration des licences ---
+
+    private fun adminAction(failure: String, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: Exception) {
+                _errorMessage.value = "$failure : ${e.message}"
+            }
+        }
+    }
+
+    fun adminCreateEstablishment(name: String, city: String, maxTeachers: Int, months: Int) =
+        adminAction("Échec de la création") {
+            establishmentRepository.create(name.trim(), city.trim(), maxTeachers, months)
+        }
+
+    fun adminSetActive(id: String, active: Boolean) =
+        adminAction("Échec de la modification") { establishmentRepository.setActive(id, active) }
+
+    fun adminSetMaxTeachers(id: String, maxTeachers: Int) =
+        adminAction("Échec de la modification") {
+            establishmentRepository.setMaxTeachers(id, maxTeachers)
+        }
+
+    fun adminExtend(establishment: Establishment, months: Int) =
+        adminAction("Échec de la prolongation") {
+            establishmentRepository.extend(establishment, months)
+        }
+
+    fun adminRegenerateCode(establishment: Establishment) =
+        adminAction("Échec du changement de code") {
+            establishmentRepository.regenerateCode(establishment)
+        }
+
+    fun adminRecount(id: String) =
+        adminAction("Échec du recomptage") { establishmentRepository.recount(id) }
 
     // --- Groupes de navette ---
 
@@ -260,3 +331,26 @@ class NavetteViewModel(
         else -> raw
     }
 }
+
+/**
+ * Message à afficher quand l'utilisateur ne peut pas voir les données de son
+ * établissement (pas encore rejoint, licence suspendue ou expirée) ; null si tout va bien.
+ */
+fun licenseProblem(profile: Teacher?, establishment: Establishment?): String? = when {
+    profile?.establishmentId.isNullOrBlank() ->
+        "Rejoignez d'abord votre établissement dans « Mon profil », avec le code d'accès " +
+            "fourni par votre administration."
+    establishment == null -> null
+    !establishment.active ->
+        "La licence de votre établissement est suspendue. Contactez votre administration."
+    establishment.expiresAtMillis <= System.currentTimeMillis() ->
+        "La licence de votre établissement a expiré le ${formatDate(establishment.expiresAtMillis)}. " +
+            "Contactez votre administration."
+    else -> null
+}
+
+/** Date au format jj/mm/aaaa. */
+fun formatDate(millis: Long): String =
+    java.time.Instant.ofEpochMilli(millis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"))

@@ -74,6 +74,7 @@ class TeacherRepository(
         "unavailableDays" to unavailableDays,
         "establishmentId" to establishmentId,
         "establishmentName" to establishmentName,
+        "joinCode" to joinCode,
         "schedule" to schedule
     )
 

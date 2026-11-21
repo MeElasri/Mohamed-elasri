@@ -66,17 +66,34 @@ enum class GroupPeriod(val label: String) {
 }
 
 /**
- * Établissement scolaire. Chaque enseignant en choisit un dans son profil ;
- * les enseignants et les groupes sont cloisonnés par établissement.
+ * Établissement scolaire et sa licence.
+ *
+ * Seul un administrateur peut créer un établissement et gérer sa licence.
+ * Les enseignants le rejoignent avec le [code] d'accès ; ils n'accèdent aux
+ * données que si la licence est [active] et non expirée ([expiresAtMillis]),
+ * dans la limite de [maxTeachers] enseignants.
  */
 data class Establishment(
     @DocumentId
     val id: String = "",
     val name: String = "",
-    val city: String = ""
+    val city: String = "",
+    /** false = licence suspendue par l'administrateur. */
+    val active: Boolean = false,
+    /** Date de fin de licence (millisecondes depuis 1970). */
+    val expiresAtMillis: Long = 0L,
+    /** Nombre maximum d'enseignants autorisés par la licence. */
+    val maxTeachers: Int = 0,
+    /** Nombre d'enseignants ayant rejoint l'établissement. */
+    val memberCount: Int = 0,
+    /** Code d'accès à communiquer aux enseignants de l'établissement. */
+    val code: String = ""
 ) {
     /** Libellé affiché : « Nom — Ville » (ou le nom seul). */
     fun label(): String = if (city.isBlank()) name else "$name — $city"
+
+    /** La licence est-elle utilisable à l'instant [now] ? */
+    fun hasValidLicense(now: Long): Boolean = active && expiresAtMillis > now
 }
 
 /**
@@ -138,6 +155,8 @@ data class Teacher(
     /** Établissement de l'enseignant : il ne voit que les collègues et groupes de celui-ci. */
     val establishmentId: String = "",
     val establishmentName: String = "",
+    /** Code d'accès utilisé pour rejoindre l'établissement (vérifié par le serveur). */
+    val joinCode: String = "",
     val schedule: Map<String, List<String>> = emptyMap()
 ) {
     /** Indique si l'enseignant est disponible le [day] donné. */

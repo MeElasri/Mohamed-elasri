@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Person
@@ -41,6 +42,7 @@ import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import com.etablissement.navette.ui.AuthState
 import com.etablissement.navette.ui.NavetteViewModel
+import com.etablissement.navette.ui.screens.AdminScreen
 import com.etablissement.navette.ui.screens.CreateEditGroupScreen
 import com.etablissement.navette.ui.screens.GroupsScreen
 import com.etablissement.navette.ui.screens.HomeScreen
@@ -66,11 +68,12 @@ private object Routes {
     const val HOME = "home"
     const val PROFILE = "profile"
     const val GROUPS = "groups"
+    const val ADMIN = "admin"
     const val GROUP_EDIT_ARG = "groupEdit?groupId={groupId}"
     fun groupEdit(groupId: String? = null) =
         if (groupId == null) "groupEdit" else "groupEdit?groupId=$groupId"
 
-    val bottomRoutes = listOf(HOME, PROFILE, GROUPS)
+    val bottomRoutes = listOf(HOME, PROFILE, GROUPS, ADMIN)
 }
 
 @Composable
@@ -110,11 +113,15 @@ private fun LoadingScreen() {
 private fun MainApp(viewModel: NavetteViewModel) {
     val navController = rememberNavController()
 
-    val bottomItems = listOf(
-        Triple(Routes.HOME, "Navette", Icons.Filled.DirectionsBus),
-        Triple(Routes.GROUPS, "Groupes", Icons.Filled.Groups),
-        Triple(Routes.PROFILE, "Mon profil", Icons.Filled.Person)
-    )
+    val isAdmin by viewModel.isAdmin.collectAsStateWithLifecycle()
+
+    val bottomItems = buildList {
+        add(Triple(Routes.HOME, "Navette", Icons.Filled.DirectionsBus))
+        add(Triple(Routes.GROUPS, "Groupes", Icons.Filled.Groups))
+        add(Triple(Routes.PROFILE, "Mon profil", Icons.Filled.Person))
+        // Onglet réservé aux comptes administrateurs (gestion des licences).
+        if (isAdmin) add(Triple(Routes.ADMIN, "Licences", Icons.Filled.AdminPanelSettings))
+    }
 
     Scaffold(
         bottomBar = {
@@ -162,6 +169,7 @@ private fun MainApp(viewModel: NavetteViewModel) {
                 )
             }
             composable(Routes.PROFILE) { ProfileScreen(viewModel = viewModel) }
+            composable(Routes.ADMIN) { AdminScreen(viewModel = viewModel) }
             composable(
                 route = Routes.GROUP_EDIT_ARG,
                 arguments = listOf(
