@@ -16,6 +16,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.elasri.presence.data.AuthState
+import com.elasri.presence.data.LicenseState
 import com.elasri.presence.ui.screens.AttendanceScreen
 import com.elasri.presence.ui.screens.ClassDetailScreen
 import com.elasri.presence.ui.screens.ClassesScreen
@@ -24,6 +25,7 @@ import com.elasri.presence.ui.screens.NotAuthorizedScreen
 import com.elasri.presence.ui.screens.ReportScreen
 import com.elasri.presence.ui.screens.SessionsScreen
 import com.elasri.presence.ui.screens.StatsScreen
+import com.elasri.presence.ui.screens.SubscriptionScreen
 import com.elasri.presence.ui.screens.TeachersScreen
 import com.elasri.presence.ui.screens.WelcomeScreen
 
@@ -33,6 +35,7 @@ private const val HOME = "home"
 fun AppNav() {
     val repo = repository()
     val auth by repo.authState.collectAsStateWithLifecycle()
+    val license by repo.licenseState.collectAsStateWithLifecycle()
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val classArg = navArgument("classId") { type = NavType.StringType }
@@ -41,6 +44,14 @@ fun AppNav() {
     LaunchedEffect(auth) {
         val route = backStack?.destination?.route
         if (auth !is AuthState.Ready && auth !is AuthState.Loading && route != null && route != "welcome" && route != HOME) {
+            if (!nav.popBackStack(HOME, inclusive = false)) nav.navigate(HOME)
+        }
+    }
+
+    // Subscription expired/suspended while inside the app → back to the gate (shows the paywall).
+    LaunchedEffect(license) {
+        val route = backStack?.destination?.route
+        if (license is LicenseState.Blocked && route != null && route != "welcome" && route != HOME) {
             if (!nav.popBackStack(HOME, inclusive = false)) nav.navigate(HOME)
         }
     }
@@ -59,12 +70,22 @@ fun AppNav() {
                 }
                 AuthState.SignedOut -> LoginScreen()
                 is AuthState.NotAuthorized -> NotAuthorizedScreen(st.email, onSignOut = { repo.signOut() })
-                is AuthState.Ready -> ClassesScreen(
-                    profile = st.profile,
-                    onOpen = { id -> nav.navigate("class/$id") },
-                    onTeachers = { nav.navigate("teachers") },
-                    onStats = { nav.navigate("stats") }
-                )
+                is AuthState.Ready -> when (val lic = license) {
+                    LicenseState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    is LicenseState.Blocked -> SubscriptionScreen(
+                        state = lic,
+                        onRetry = { repo.refreshLicense() },
+                        onSignOut = { repo.signOut() }
+                    )
+                    is LicenseState.Valid -> ClassesScreen(
+                        profile = st.profile,
+                        onOpen = { id -> nav.navigate("class/$id") },
+                        onTeachers = { nav.navigate("teachers") },
+                        onStats = { nav.navigate("stats") }
+                    )
+                }
             }
         }
 

@@ -40,6 +40,23 @@ Firestore → onglet **Index** → **Composite** → **Créer un index** :
 
 Ensuite, tout se fait **dans l'application**.
 
+## 6 bis. Activer l'abonnement (licence)
+
+L'application est **payante par abonnement** : sans licence valide, elle affiche « Abonnement requis »
+et reste bloquée. Créez la licence dans Firestore :
+
+- **Démarrer une collection** → ID : `config` → ID du document : `license` → champs :
+
+| Champ | Type | Valeur |
+|---|---|---|
+| `active` | boolean | true |
+| `establishment` | string | nom de l'établissement (affiché si bloqué) |
+| `plan` | string | `annuel` (facultatif) |
+| `expiresAt` | timestamp | fin de la période payée (ex. `2027-09-01 00:00`) |
+
+Pour **renouveler** plus tard : changez `expiresAt`. Pour **suspendre** : mettez `active` à `false`.
+Détails complets dans **`ABONNEMENT.md`**.
+
 ## 7. Dans l'application (compte admin)
 1. Connexion → menu ⋮ → **Importer depuis Massar (.xlsx)** → sélectionnez toutes les listes.
 2. Menu ⋮ → **Enseignants et classes attribuées** → **Nouveau compte** pour chaque enseignant (nom, e-mail, mot de passe provisoire proposé) → cochez ses classes.

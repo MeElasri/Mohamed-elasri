@@ -30,6 +30,14 @@ service cloud.firestore {
       return isActive() && classId in me().get('classIds', []);
     }
 
+    // ---------- Subscription licence ----------
+    // Read by any signed-in user (the app checks it to unlock). Never writable from a client:
+    // the licence is created/renewed only from the Firebase console (or the Admin SDK).
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
     // ---------- Accounts ----------
     match /users/{uid} {
       allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();

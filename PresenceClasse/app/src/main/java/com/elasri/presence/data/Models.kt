@@ -95,3 +95,26 @@ sealed interface AuthState {
     data class NotAuthorized(val email: String) : AuthState
     data class Ready(val profile: UserProfile) : AuthState
 }
+
+/**
+ * Subscription licence of the establishment, read from `config/license` in Firestore.
+ * The document is written only from the Firebase console (security rules forbid any client write),
+ * so the school cannot alter or extend it from the app.
+ */
+data class License(
+    val active: Boolean,
+    val establishment: String,
+    val plan: String,
+    /** Expiry as epoch millis (end of the paid period); 0 when no date is set. */
+    val expiresAt: Long
+)
+
+/** Why the application is locked behind the subscription screen. */
+enum class BlockReason { EXPIRED, INACTIVE, MISSING }
+
+/** Subscription state that gates the whole app once the user is signed in. */
+sealed interface LicenseState {
+    data object Loading : LicenseState
+    data class Valid(val license: License) : LicenseState
+    data class Blocked(val reason: BlockReason, val license: License?) : LicenseState
+}

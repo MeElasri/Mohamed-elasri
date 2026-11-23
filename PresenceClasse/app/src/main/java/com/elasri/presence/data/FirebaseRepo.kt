@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
+import java.time.ZoneId
 
 private const val TAG = "FirebaseRepo"
 
@@ -98,6 +99,7 @@ class FirebaseRepo(private val context: Context) {
     private val users get() = db.collection("users")
     private val classes get() = db.collection("classes")
     private val sessions get() = db.collection("sessions")
+    private val config get() = db.collection("config")
     private fun students(classId: String) = classes.document(classId).collection("students")
 
     // =====================================================================
@@ -159,6 +161,57 @@ class FirebaseRepo(private val context: Context) {
         classIds = (d.get("classIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
         active = d.getBoolean("active") != false
     )
+
+    // =====================================================================
+    // Subscription licence (config/license, written only from the console)
+    // =====================================================================
+
+    private fun parseLicense(d: DocumentSnapshot): License {
+        // `expiresAt` may be a Firestore timestamp (recommended) or a "YYYY-MM-DD" string.
+        val millis = d.getTimestamp("expiresAt")?.toDate()?.time
+            ?: d.getString("expiresAt")?.let { s ->
+                runCatching {
+                    LocalDate.parse(s.trim()).plusDays(1) // valid through the whole expiry day
+                        .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrNull()
+            }
+            ?: 0L
+        return License(
+            active = d.getBoolean("active") != false,
+            establishment = d.getString("establishment").orEmpty(),
+            plan = d.getString("plan").orEmpty(),
+            expiresAt = millis
+        )
+    }
+
+    private fun evaluateLicense(snap: DocumentSnapshot): LicenseState = when {
+        !snap.exists() && snap.metadata.isFromCache -> LicenseState.Loading // wait for the server
+        !snap.exists() -> LicenseState.Blocked(BlockReason.MISSING, null)
+        else -> {
+            val lic = parseLicense(snap)
+            when {
+                !lic.active -> LicenseState.Blocked(BlockReason.INACTIVE, lic)
+                lic.expiresAt <= 0L -> LicenseState.Blocked(BlockReason.MISSING, lic)
+                lic.expiresAt <= System.currentTimeMillis() -> LicenseState.Blocked(BlockReason.EXPIRED, lic)
+                else -> LicenseState.Valid(lic)
+            }
+        }
+    }
+
+    /**
+     * Subscription state of the establishment. Only evaluated once signed in (the rules require it).
+     * A read error keeps the app on "Loading" rather than locking users out on a transient problem.
+     */
+    val licenseState: StateFlow<LicenseState> = authState.flatMapLatest { st ->
+        if (st !is AuthState.Ready) flowOf(LicenseState.Loading)
+        else config.document("license").listen().map(::evaluateLicense)
+            .catch { e -> Log.w(TAG, "license", e); emit(LicenseState.Loading) }
+    }.stateIn(scope, SharingStarted.Eagerly, LicenseState.Loading)
+
+    /** Forces a fresh read from the server (used by the "Réessayer" button). */
+    suspend fun refreshLicense() {
+        runCatching { config.document("license").get(Source.SERVER).await() }
+    }
 
     // =====================================================================
     // Classes (admin: all classes, teacher: the classes assigned to them)
