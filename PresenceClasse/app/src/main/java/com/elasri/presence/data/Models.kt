@@ -110,7 +110,12 @@ data class License(
 )
 
 /** Why the application is locked behind the subscription screen. */
-enum class BlockReason { EXPIRED, INACTIVE, MISSING }
+enum class BlockReason {
+    EXPIRED,   // the paid period is over
+    INACTIVE,  // active = false (suspended)
+    MISSING,   // no config/license document (or no expiry set)
+    ERROR      // the licence could not be read (no network, or rules not published)
+}
 
 /** Subscription state that gates the whole app once the user is signed in. */
 sealed interface LicenseState {

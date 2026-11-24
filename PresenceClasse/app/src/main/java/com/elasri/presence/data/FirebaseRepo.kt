@@ -30,6 +30,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
@@ -198,18 +199,24 @@ class FirebaseRepo(private val context: Context) {
         }
     }
 
+    // Bumped by refreshLicense() to restart the listener (e.g. after fixing rules / regaining network).
+    private val licenseRefresh = MutableStateFlow(0)
+
     /**
      * Subscription state of the establishment. Only evaluated once signed in (the rules require it).
-     * A read error keeps the app on "Loading" rather than locking users out on a transient problem.
+     * A read error (no network, or rules not yet published) surfaces a clear "Réessayer" screen
+     * instead of an endless spinner.
      */
-    val licenseState: StateFlow<LicenseState> = authState.flatMapLatest { st ->
-        if (st !is AuthState.Ready) flowOf(LicenseState.Loading)
-        else config.document("license").listen().map(::evaluateLicense)
-            .catch { e -> Log.w(TAG, "license", e); emit(LicenseState.Loading) }
-    }.stateIn(scope, SharingStarted.Eagerly, LicenseState.Loading)
+    val licenseState: StateFlow<LicenseState> =
+        combine(authState, licenseRefresh) { st, _ -> st }.flatMapLatest { st ->
+            if (st !is AuthState.Ready) flowOf(LicenseState.Loading)
+            else config.document("license").listen().map(::evaluateLicense)
+                .catch { e -> Log.w(TAG, "license", e); emit(LicenseState.Blocked(BlockReason.ERROR, null)) }
+        }.stateIn(scope, SharingStarted.Eagerly, LicenseState.Loading)
 
-    /** Forces a fresh read from the server (used by the "Réessayer" button). */
+    /** Restarts the licence check (used by the "Réessayer" button) and asks the server for a fresh copy. */
     suspend fun refreshLicense() {
+        licenseRefresh.value += 1
         runCatching { config.document("license").get(Source.SERVER).await() }
     }
 

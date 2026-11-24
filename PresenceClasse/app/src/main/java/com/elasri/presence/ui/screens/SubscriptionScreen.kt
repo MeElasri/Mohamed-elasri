@@ -70,6 +70,9 @@ fun SubscriptionScreen(
                 (lastValidDay?.let { " le ${it.fmtShort()}" } ?: "") + "."
         BlockReason.INACTIVE -> "L'abonnement de l'établissement a été suspendu."
         BlockReason.MISSING -> "Aucun abonnement actif n'est configuré pour cet établissement."
+        BlockReason.ERROR ->
+            "Impossible de vérifier l'abonnement. Vérifiez la connexion Internet, ou que les règles " +
+                "de sécurité Firestore ont bien été publiées, puis réessayez."
     }
 
     Column(
