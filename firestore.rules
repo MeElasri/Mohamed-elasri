@@ -3,11 +3,10 @@ rules_version = '2';
 // Règles de sécurité Firestore de Navette Profs.
 // À copier dans la console Firebase : Firestore Database > Règles > Publier.
 //
-// Principe : chaque enseignant a son propre abonnement (subscriptions/{uid}).
-// Il n'accède aux données de son établissement que si son abonnement est valide :
-// période d'essai de 7 jours après la création du compte, ou période payée
-// activée par un administrateur. Seul un administrateur (document admins/{uid})
-// peut activer un abonnement ou créer un établissement.
+// Principe : un enseignant n'accède aux données d'un établissement que s'il l'a
+// rejoint avec son code d'accès ET que la licence de cet établissement est
+// active et non expirée. Seul un administrateur (document admins/{uid}) peut
+// créer ou modifier des établissements et leurs licences.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -24,45 +23,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data;
     }
 
-    function mySubscription() {
-      return get(/databases/$(database)/documents/subscriptions/$(request.auth.uid)).data;
+    function etab(id) {
+      return get(/databases/$(database)/documents/establishments/$(id)).data;
     }
 
-    // Abonnement valide : non suspendu, et soit payé, soit encore en essai (7 jours).
-    function subscriptionOk() {
-      return mySubscription().active == true && (
-        mySubscription().paidUntilMillis > request.time.toMillis()
-        || mySubscription().createdAt.toMillis() + 604800000 > request.time.toMillis()
-      );
+    function licenseOk(id) {
+      return etab(id).active == true
+        && etab(id).expiresAtMillis > request.time.toMillis();
     }
 
-    // L'utilisateur est rattaché à l'établissement [id] et son abonnement est valide.
+    // L'utilisateur est membre de l'établissement [id] et sa licence est valide.
     function memberOf(id) {
       return id != ''
         && myProfile().establishmentId == id
-        && subscriptionOk();
+        && licenseOk(id);
     }
 
     // Administrateurs : créés à la main dans la console Firebase uniquement.
     match /admins/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
-    }
-
-    // Abonnement individuel. L'enseignant peut seulement créer le sien, une fois,
-    // à la date du serveur (début de l'essai) et sans période payée. Lui seul et
-    // l'administrateur peuvent le lire ; seul l'administrateur peut le modifier.
-    match /subscriptions/{uid} {
-      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isAdmin() || (
-        signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['email', 'active', 'paidUntilMillis', 'createdAt'])
-        && request.resource.data.active == true
-        && request.resource.data.paidUntilMillis == 0
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.email == request.auth.token.email
-      );
-      allow update, delete: if isAdmin();
     }
 
     // Codes d'accès : lisibles un par un (il faut connaître le code), jamais listables.
@@ -73,15 +52,33 @@ service cloud.firestore {
 
     match /establishments/{id} {
       allow get: if signedIn();
-      allow list, write: if isAdmin();
+      allow list, create, delete: if isAdmin();
+      // Un enseignant qui rejoint l'établissement peut seulement augmenter le
+      // compteur de membres de 1, dans la limite de la licence, et uniquement
+      // dans la même transaction que la mise à jour de son profil.
+      allow update: if isAdmin() || (
+        signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount'])
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && request.resource.data.memberCount <= resource.data.maxTeachers
+        && resource.data.active == true
+        && resource.data.expiresAtMillis > request.time.toMillis()
+        && getAfter(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.establishmentId == id
+        && (
+          !exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+          || myProfile().get('establishmentId', '') != id
+        )
+      );
     }
 
     match /teachers/{uid} {
-      // Rejoindre un établissement : il faut connaître son code d'accès.
+      // Rejoindre un établissement : il faut son code, et la place doit avoir été
+      // comptée dans la même transaction (ce qui vérifie licence et limite).
       function joining() {
         let d = request.resource.data;
-        return get(/databases/$(database)/documents/licenseCodes/$(d.joinCode)).data.establishmentId
-          == d.establishmentId;
+        return get(/databases/$(database)/documents/licenseCodes/$(d.joinCode)).data.establishmentId == d.establishmentId
+          && getAfter(/databases/$(database)/documents/establishments/$(d.establishmentId)).data.memberCount
+             == etab(d.establishmentId).memberCount + 1;
       }
 
       allow read: if signedIn() && (

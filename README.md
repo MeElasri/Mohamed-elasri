@@ -71,17 +71,15 @@ puis cliquez sur **Publier**.
 
 Elles garantissent, côté serveur, que :
 
-- chaque enseignant a son **propre abonnement** et ne peut ni le prolonger ni
-  relancer son essai lui-même ;
-- sans abonnement valide (essai de 7 jours ou période payée), il ne voit ni
-  collègues ni groupes ;
-- il ne voit que les enseignants et groupes de **son établissement**, qu'il ne
-  peut rejoindre qu'avec le **code d'accès** ;
-- seul un **administrateur** peut activer un abonnement ou créer un établissement.
+- un enseignant ne voit que les enseignants et groupes de **son établissement** ;
+- il ne peut rejoindre un établissement qu'avec son **code d'activation** ;
+- l'accès est coupé si la licence est **suspendue** ou **expirée** ;
+- le **nombre maximum d'enseignants** de la licence ne peut pas être dépassé ;
+- seul un **administrateur** peut créer un établissement ou modifier une licence.
 
 ### Compte administrateur (vendeur de l'application)
 
-L'onglet **Admin** n'apparaît que pour un compte administrateur. Pour désigner
+L'onglet **Licences** n'apparaît que pour un compte administrateur. Pour désigner
 le vôtre (à faire une seule fois) :
 
 1. Créez votre compte dans l'application (e-mail + mot de passe).
@@ -89,35 +87,20 @@ le vôtre (à faire une seule fois) :
 3. Console Firebase → **Firestore Database → Données** : créez la collection
    **`admins`**, avec un document dont l'**ID est votre UID** (un champ quelconque,
    par exemple `role` = `admin`).
-4. Relancez l'application : l'onglet **Admin** apparaît.
+4. Relancez l'application : l'onglet **Licences** apparaît.
 
 Aucun compte ne peut se déclarer administrateur depuis l'application : ce
 document ne peut être créé que dans la console Firebase.
 
-### Abonnements individuels
+### Vendre une licence à un établissement
 
-Chaque enseignant paie son propre abonnement, en dehors de l'application.
-
-1. À la création de son compte, l'enseignant dispose de **7 jours d'essai gratuit**.
-2. Pour continuer, il vous paie et vous indique son **adresse e-mail** (affichée
-   dans son onglet **Abonnement**).
-3. Onglet **Admin → Abonnements** : recherchez son e-mail ou son nom, puis ajoutez
-   la durée payée (**+1 mois**, **+3 mois**, **+1 an**). L'accès est immédiat.
-4. Vous pouvez **suspendre** un compte, le **réactiver**, ou **annuler la période
-   payée** en cas d'erreur.
-
-À la fin de l'essai ou de la période payée, l'enseignant ne voit plus la navette
-ni les groupes, jusqu'à la prochaine activation.
-
-### Établissements
-
-Les établissements servent à regrouper les collègues ; ils ne sont pas payants.
-
-1. Onglet **Admin → Établissements** → **+** : saisissez le nom et la ville.
-   Un **code d'accès** est généré.
-2. Communiquez ce code aux enseignants de l'établissement, qui le saisissent
-   dans **Mon profil**.
-3. **Enseignants** affiche les inscrits ; **Nouveau code** remplace le code.
+1. Onglet **Licences** → **+** : saisissez le nom, la ville, le nombre maximum
+   d'enseignants et la durée en mois. Un **code d'activation** est généré.
+2. Communiquez ce code à l'établissement.
+3. Chaque enseignant crée son compte puis saisit le code dans **Mon profil**.
+4. Depuis la carte de l'établissement, vous pouvez **suspendre** la licence,
+   la **prolonger** (+1 mois, +1 an), changer le nombre de **places**, générer un
+   **nouveau code** ou **recompter** les enseignants rattachés.
 
 ## ▶️ Compilation & exécution
 

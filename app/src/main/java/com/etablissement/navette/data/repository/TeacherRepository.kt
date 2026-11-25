@@ -57,20 +57,6 @@ class TeacherRepository(
         awaitClose { registration.remove() }
     }
 
-    /** Tous les enseignants, en temps réel (écran d'administration uniquement). */
-    fun observeAll(): Flow<List<Teacher>> = callbackFlow {
-        val registration = collection.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
-            }
-            trySend(
-                snapshot?.documents?.mapNotNull { it.toObject(Teacher::class.java) } ?: emptyList()
-            )
-        }
-        awaitClose { registration.remove() }
-    }
-
     /** Enseignants rattachés à un établissement, lus une fois (écran d'administration). */
     suspend fun fetchByEstablishment(establishmentId: String): List<Teacher> =
         collection.whereEqualTo("establishmentId", establishmentId).get().await()

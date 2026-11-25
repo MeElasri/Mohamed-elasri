@@ -50,7 +50,7 @@ import com.etablissement.navette.data.model.Period
 import com.etablissement.navette.data.model.Teacher
 import com.etablissement.navette.data.model.Weekday
 import com.etablissement.navette.ui.NavetteViewModel
-import com.etablissement.navette.ui.accessProblem
+import com.etablissement.navette.ui.licenseProblem
 import com.etablissement.navette.util.ContactActions
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +59,7 @@ fun HomeScreen(viewModel: NavetteViewModel) {
     val teachers by viewModel.teachers.collectAsStateWithLifecycle()
     val homeState by viewModel.homeState.collectAsStateWithLifecycle()
     val myProfile by viewModel.myProfile.collectAsStateWithLifecycle()
-    val mySubscription by viewModel.mySubscription.collectAsStateWithLifecycle()
+    val myEstablishment by viewModel.myEstablishment.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
 
     // Calculs mis en cache : recalculés seulement si la liste, le jour ou la période change.
@@ -174,7 +174,7 @@ fun HomeScreen(viewModel: NavetteViewModel) {
 
             if (onNavette.isEmpty()) {
                 EmptyState(
-                    message = accessProblem(myProfile, mySubscription)
+                    message = licenseProblem(myProfile, myEstablishment)
                         ?: "Aucun professeur prévu pour cette navette.\n" +
                         "Renseignez votre emploi du temps dans « Mon profil »."
                 )
