@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
@@ -88,11 +89,13 @@ fun ClassesScreen(profile: UserProfile, onOpen: (String) -> Unit, onTeachers: ()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val sender = rememberAdminSender()
+    val printer = rememberAdminPrinter()
 
     var editor by remember { mutableStateOf<SchoolClass?>(null) }
     var toDelete by remember { mutableStateOf<SchoolClass?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var pickReportDate by remember { mutableStateOf(false) }
+    var pickPrintDate by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var changingPassword by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
@@ -173,6 +176,17 @@ fun ClassesScreen(profile: UserProfile, onOpen: (String) -> Unit, onTeachers: ()
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
+                            text = { Text(if (admin) "Imprimer les absences du jour" else "Imprimer mes absences du jour") },
+                            leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
+                            onClick = { menuOpen = false; printer.print { repo.adminReportForDay(LocalDate.now()) } }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Imprimer une autre date") },
+                            leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
+                            onClick = { menuOpen = false; pickPrintDate = true }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
                             text = { Text("Changer le mot de passe") },
                             leadingIcon = { Icon(Icons.Filled.Key, contentDescription = null) },
                             onClick = { menuOpen = false; changingPassword = true }
@@ -244,6 +258,12 @@ fun ClassesScreen(profile: UserProfile, onOpen: (String) -> Unit, onTeachers: ()
     if (pickReportDate) {
         DatePickDialog(initial = LocalDate.now(), onDismiss = { pickReportDate = false }) { date ->
             sender.send { repo.adminReportForDay(date) }
+        }
+    }
+
+    if (pickPrintDate) {
+        DatePickDialog(initial = LocalDate.now(), onDismiss = { pickPrintDate = false }) { date ->
+            printer.print { repo.adminReportForDay(date) }
         }
     }
 

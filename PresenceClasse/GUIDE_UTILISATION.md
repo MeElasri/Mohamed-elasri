@@ -118,6 +118,8 @@ Pour transmettre un bilan rapide :
 
 Un message prêt à lire s'ouvre dans le **sélecteur de partage** (WhatsApp, Gmail, Outlook…), avec un **fichier Excel** joint.
 
+**Imprimer** : menu **⋮** → **Imprimer les absences du jour** (ou **Imprimer une autre date**). Le dialogue d'impression d'Android s'ouvre : choisissez une **imprimante** ou **« Enregistrer au format PDF »**. Fonctionne hors connexion.
+
 ### 2.7 Statistiques de la semaine et convocations
 
 Écran d'accueil → icône **📊** (ou menu ⋮ → **Statistiques de la semaine**).
@@ -126,6 +128,7 @@ Un message prêt à lire s'ouvre dans le **sélecteur de partage** (WhatsApp, Gm
 - Totaux de la semaine : nombre d'appels, d'absences, de retards, par classe et par élève.
 - **Seuil de convocation** réglable (par défaut 3) : les élèves dont le nombre d'absences **atteint ou dépasse** le seuil sont listés pour **convocation**, avec le détail des séances manquées (jour + créneau) et, quand les créneaux sont lisibles (ex. « 8h-10h »), le **total d'heures** d'absence.
 - Bouton de **partage** pour envoyer ce bilan hebdomadaire (message + Excel).
+- Bouton **Imprimer** (icône imprimante, en haut) : ouvre le dialogue d'impression Android — **imprimante** ou **PDF**.
 
 ---
 

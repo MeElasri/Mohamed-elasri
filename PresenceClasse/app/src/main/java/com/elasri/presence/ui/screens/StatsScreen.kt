@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FamilyRestroom
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
@@ -72,6 +73,7 @@ fun StatsScreen(onBack: () -> Unit) {
     })
     val ui by vm.ui.collectAsStateWithLifecycle()
     val sender = rememberAdminSender()
+    val printer = rememberAdminPrinter()
     var tab by remember { mutableStateOf(StatsTab.CONVOKE) }
     var pickWeek by remember { mutableStateOf(false) }
 
@@ -81,6 +83,12 @@ fun StatsScreen(onBack: () -> Unit) {
                 title = { Text("Statistiques de la semaine") },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
+                    IconButton(
+                        onClick = { vm.report()?.let { out -> printer.print { out } } },
+                        enabled = ui.result != null && !ui.loading
+                    ) {
+                        Icon(Icons.Filled.Print, contentDescription = "Imprimer")
+                    }
                     IconButton(
                         onClick = { vm.report()?.let { out -> sender.send { out } } },
                         enabled = ui.result != null && !ui.loading

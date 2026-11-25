@@ -15,6 +15,7 @@ Kotlin · Jetpack Compose (Material 3) · Firebase Auth + Cloud Firestore (offli
 - **Students**: add one by one (with "+ Suivant" for fast entry), edit, delete, or import a `.xlsx`/`.csv` list into an existing class.
 - **Attendance call**: pick date + optional slot (8h-10h…), tap a student to mark absent, or choose P / A / R. If a call already exists for that date + slot it is loaded instead of duplicated. Warns before leaving with unsaved changes.
 - **Send to the administration**: after saving a call, "Envoyer" opens the share sheet (WhatsApp, Gmail…) with a ready-to-read message (absents, retards, présents) **and an Excel file** attached. Also available per call in *Historique* (share icon) and for **all classes of a day** from *Mes classes* (share icon, or ⋮ → another date). The teacher's name comes from their account.
+- **Print**: the **daily report** (*Mes classes* → ⋮ → *Imprimer les absences du jour* / *une autre date*) and the **weekly report** (*Statistiques* → print icon) open the Android print dialog — send to a printer or **save as PDF**. Works offline.
 - **History**: every call, with absent/late counts; tap to edit, or delete.
 - **Reports**: date range (this month, 30 days, school year…), per-student absences, lates and absence rate (red at ≥ 20 %). Export **summary CSV** or **detailed absence list CSV** (opens in Excel).
 - Data is stored in Firestore (EU). Works offline: roll calls are kept on the phone and sent when Internet returns.

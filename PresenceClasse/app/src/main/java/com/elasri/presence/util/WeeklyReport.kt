@@ -64,11 +64,50 @@ object WeeklyReport {
                 XlsxWriter.Sheet("Par classe", classRows, boldRows = setOf(0, classRows.size - 1))
             )
         )
+        val html = run {
+            val convokeHtml = if (convoke.isEmpty()) {
+                """<tr><td colspan="7">Aucun élève n'atteint le seuil cette semaine.</td></tr>"""
+            } else buildString {
+                convoke.forEachIndexed { i, s ->
+                    append(
+                        """<tr><td class="num">${i + 1}</td><td>${AdminReport.esc(s.className)}</td>""" +
+                            "<td>${AdminReport.esc(s.name)}</td><td>${AdminReport.esc(s.massarCode)}</td>" +
+                            """<td class="num">${s.absences}</td><td class="num">${AdminReport.esc(hours(s.absentHours))}</td>""" +
+                            """<td class="num">${s.lates}</td><td>${AdminReport.esc(s.absenceDetails())}</td></tr>"""
+                    )
+                }
+            }
+            val classHtml = buildString {
+                r.classes.forEach { c ->
+                    append(
+                        "<tr><td>${AdminReport.esc(c.className)}</td>" +
+                            """<td class="num">${c.sessions}</td><td class="num">${c.absences}</td>""" +
+                            """<td class="num">${c.lates}</td><td class="num">${c.studentsAbsent}</td></tr>"""
+                    )
+                }
+            }
+            val body = buildString {
+                append("""<p class="tot"><b>${r.sessions}</b> appel(s) · <b>${r.absences}</b> absence(s) · <b>${r.lates}</b> retard(s)</p>""")
+                append("<h2>Parents à convoquer (≥ $threshold absence(s)) : ${convoke.size}</h2>")
+                append("<table><tr><th>N°</th><th>Classe</th><th>Nom</th><th>Code Massar</th><th>Abs.</th><th>Heures</th><th>Ret.</th><th>Détail des absences</th></tr>")
+                append(convokeHtml)
+                append("</table>")
+                if (r.classes.isNotEmpty()) {
+                    append("<h2>Par classe</h2>")
+                    append("<table><tr><th>Classe</th><th>Appels</th><th>Absences</th><th>Retards</th><th>Élèves absents</th></tr>")
+                    append(classHtml)
+                    append("</table>")
+                }
+            }
+            AdminReport.page("Absences de la semaine $period", "Seuil de convocation : $threshold absence(s)", body)
+        }
+
         return AdminReport.Output(
             subject = "Absences de la semaine $period – ${convoke.size} parent(s) à convoquer",
             message = msg,
             fileName = "absences_semaine_${r.from}.xlsx",
-            xlsx = xlsx
+            xlsx = xlsx,
+            html = html
         )
     }
 }
