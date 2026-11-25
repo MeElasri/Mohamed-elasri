@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +56,7 @@ fun SessionsScreen(classId: String, onBack: () -> Unit, onOpen: (String) -> Unit
     val cls by vm.schoolClass.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<Session?>(null) }
     val sender = rememberAdminSender()
+    val printer = rememberAdminPrinter()
 
     Scaffold(
         topBar = {
@@ -109,6 +111,9 @@ fun SessionsScreen(classId: String, onBack: () -> Unit, onOpen: (String) -> Unit
                                         Icons.Filled.CloudOff, contentDescription = "En attente d'envoi",
                                         tint = LateColor, modifier = Modifier.padding(12.dp)
                                     )
+                                }
+                                IconButton(onClick = { printer.print { repo.adminReportForSession(s.id) } }) {
+                                    Icon(Icons.Filled.Print, contentDescription = "Imprimer")
                                 }
                                 IconButton(onClick = { sender.send { repo.adminReportForSession(s.id) } }) {
                                     Icon(Icons.Filled.Share, contentDescription = "Envoyer à l'administration")

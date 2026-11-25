@@ -188,6 +188,7 @@ Si vous quittez l'appel avec des modifications non enregistrées, l'application 
 Classe → **Historique** : tous les appels (les ~120 derniers jours), du plus récent au plus ancien, avec le nombre d'absents / retards.
 
 - Touchez un appel pour le **modifier**.
+- Icône **imprimante** pour l'imprimer (imprimante ou PDF).
 - Icône de **partage** pour le renvoyer.
 - Possibilité de **supprimer** un appel.
 
