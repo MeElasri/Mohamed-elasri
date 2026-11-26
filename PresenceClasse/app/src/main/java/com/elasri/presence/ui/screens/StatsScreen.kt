@@ -194,9 +194,18 @@ fun StatsScreen(onBack: () -> Unit) {
                     }
                     items(ui.convoke, key = { "c_${it.classId}_${it.studentId}" }) { s -> StudentRow(s, highlight = true) }
                 }
-                tab == StatsTab.STUDENTS -> items(r.students, key = { "s_${it.classId}_${it.studentId}" }) { s ->
-                    StudentRow(s, highlight = s.absences >= ui.threshold)
-                }
+                tab == StatsTab.STUDENTS ->
+                    r.students
+                        .groupBy { it.classId }
+                        .values
+                        .sortedBy { it.first().className.lowercase() }
+                        .forEach { studs ->
+                            val cls = studs.first()
+                            item(key = "h_${cls.classId}") { ClassHeader(cls.className, studs) }
+                            items(studs, key = { "s_${it.classId}_${it.studentId}" }) { s ->
+                                StudentRow(s, highlight = s.absences >= ui.threshold, showClass = false)
+                            }
+                        }
                 else -> items(r.classes, key = { "k_${it.classId}" }) { c -> ClassRow(c, r.absences) }
             }
         }
@@ -218,8 +227,33 @@ private fun BigStat(label: String, value: Int?, color: Color) {
 private fun hoursText(h: Double?): String =
     if (h == null) "" else " · " + String.format(Locale.FRENCH, "%.1f", h).removeSuffix(",0") + " h"
 
+/** Section header for the "Tous les élèves" tab, grouped by class. */
 @Composable
-private fun StudentRow(s: WeeklyStats.StudentWeek, highlight: Boolean) {
+private fun ClassHeader(className: String, students: List<WeeklyStats.StudentWeek>) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            className,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            "${students.size} élève(s) · ${students.sumOf { it.absences }} abs.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+    }
+}
+
+@Composable
+private fun StudentRow(s: WeeklyStats.StudentWeek, highlight: Boolean, showClass: Boolean = true) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -229,11 +263,14 @@ private fun StudentRow(s: WeeklyStats.StudentWeek, highlight: Boolean) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(s.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                Text(
-                    listOf(s.className, s.massarCode).filter { it.isNotBlank() }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                val sub = listOf(if (showClass) s.className else "", s.massarCode).filter { it.isNotBlank() }.joinToString(" · ")
+                if (sub.isNotBlank()) {
+                    Text(
+                        sub,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Box(
                 Modifier
